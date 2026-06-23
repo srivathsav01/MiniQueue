@@ -22,6 +22,6 @@ public class MessageController {
     @PostMapping(APIConstants.PUBLISH_MESSAGE)
     public Response<String> publishMessage(@RequestBody PublishMessageRequest publishMessageRequest) throws CustomException {
         messageService.publishMessage(publishMessageRequest.getTopicName(),publishMessageRequest.getPayload());
-        return new ResponseBuilder<String>().createSuccessData("Message Successfully Published");
+        return ResponseBuilder.createSuccessData("Message Successfully Published");
     }
 }
