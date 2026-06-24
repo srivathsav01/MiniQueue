@@ -11,4 +11,11 @@ public class ResponseBuilder<T> {
         response.setStatus(200);
         return response;
     }
+
+    public static <T> Response<T> createErrorResponse(String errorMessage) {
+        Response<T> response = new Response<>();
+        response.setStatus(400);
+        response.setMessage(errorMessage);
+        return response;
+    }
 }

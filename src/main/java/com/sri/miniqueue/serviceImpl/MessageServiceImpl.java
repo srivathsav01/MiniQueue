@@ -1,5 +1,6 @@
 package com.sri.miniqueue.serviceImpl;
 
+import com.sri.miniqueue.dto.ConsumeResponse;
 import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
 import com.sri.miniqueue.entity.Topic;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -74,5 +76,26 @@ public class MessageServiceImpl implements MessageService {
         this.messageRepository.saveAll(messages);
     }
 
-
+    @Override
+    public ConsumeResponse consumeMessage(String queueName, String consumerId) throws CustomException {
+        Optional<Queue> queue = this.queueRepository.findByName(queueName.toLowerCase());
+        if(queue.isEmpty()){
+            throw new CustomException("No Queue found with the name "+ queueName);
+        }
+        Optional<Message> message = this.messageRepository.findOldestByQueueAndStatus(queue.get(),MessageStatus.PENDING);
+        if(message.isEmpty()){
+            throw new CustomException("No Messages found in the Queue "+queueName);
+        }
+        Message msg = message.get();
+        msg.setStatus(MessageStatus.UNACKED);
+        msg.setConsumerId(consumerId);
+        msg.setUnackedAt(LocalDateTime.now());
+        this.messageRepository.save(msg);
+        ConsumeResponse consumeResponse = new ConsumeResponse();
+        consumeResponse.setMessageId(msg.getId());
+        consumeResponse.setPayload(msg.getPayload());
+        consumeResponse.setPublishedAt(msg.getPublishedAt());
+        consumeResponse.setQueueName(queueName);
+        return consumeResponse;
+    }
 }

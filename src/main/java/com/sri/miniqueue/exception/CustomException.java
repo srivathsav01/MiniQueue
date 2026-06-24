@@ -1,6 +1,6 @@
 package com.sri.miniqueue.exception;
 
-public class CustomException extends Exception{
+public class CustomException extends RuntimeException {
 
     CustomException(){ super(); }
 

@@ -20,7 +20,7 @@ public class MessageController {
     private final MessageService messageService;
 
     @PostMapping(APIConstants.PUBLISH_MESSAGE)
-    public Response<String> publishMessage(@RequestBody PublishMessageRequest publishMessageRequest) throws CustomException {
+    public Response<String> publishMessage(@RequestBody PublishMessageRequest publishMessageRequest) {
         messageService.publishMessage(publishMessageRequest.getTopicName(),publishMessageRequest.getPayload());
         return ResponseBuilder.createSuccessData("Message Successfully Published");
     }
