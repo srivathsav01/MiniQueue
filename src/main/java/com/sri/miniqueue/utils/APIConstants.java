@@ -11,5 +11,8 @@ public interface APIConstants {
     String QUEUE="/queues";
     String CREATE_QUEUE="/createQueue";
 
+    String CONSUMER = "/consumer";
+    String CONSUME_MESSAGE="/consumeMessage";
+    String ACK_MESSAGE="/ackMessage";
 
 }

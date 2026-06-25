@@ -14,7 +14,7 @@ public class ConsumeResponse {
         private String payload;
 
         @JsonProperty("message_id")
-        private UUID MessageId;
+        private UUID messageId;
 
         @JsonProperty("published_at")
         private LocalDateTime publishedAt;

@@ -7,6 +7,8 @@ import com.sri.miniqueue.exception.CustomException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.UUID;
+
 public interface MessageService {
 
     Topic createTopic(String name) throws CustomException;
@@ -16,4 +18,6 @@ public interface MessageService {
     void publishMessage(String topicName, String payload) throws CustomException;
 
     ConsumeResponse consumeMessage(String queueName, String consumerId) throws CustomException;
+
+    String ackMessage(UUID messageId, String consumerId) throws CustomException;
 }
