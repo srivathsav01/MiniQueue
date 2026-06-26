@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,4 +19,6 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     @Query("SELECT m FROM Message m WHERE m.queue = :queue AND m.status = :status ORDER BY m.publishedAt ASC LIMIT 1")
     Optional<Message> findOldestByQueueAndStatus(@Param("queue") Queue queue, @Param("status") MessageStatus status);
 
+    @Query("SELECT m FROM Message m WHERE m.status = :status AND m.unackedAt < :cutoff")
+    List<Message> findStuckMessages(@Param("status") MessageStatus status, @Param("cutoff")LocalDateTime cutoff);
 }
