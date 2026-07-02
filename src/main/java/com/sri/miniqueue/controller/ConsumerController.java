@@ -2,6 +2,7 @@ package com.sri.miniqueue.controller;
 
 import com.sri.miniqueue.dto.AckRequest;
 import com.sri.miniqueue.dto.ConsumeResponse;
+import com.sri.miniqueue.dto.NackRequest;
 import com.sri.miniqueue.dto.Response;
 import com.sri.miniqueue.mapper.ResponseBuilder;
 import com.sri.miniqueue.service.MessageService;
@@ -24,5 +25,10 @@ public class ConsumerController {
     @PostMapping(APIConstants.ACK_MESSAGE)
     public Response<String> ackMessage(@RequestBody AckRequest ackRequest){
         return ResponseBuilder.createSuccessData(messageService.ackMessage(ackRequest.getMessageId(),ackRequest.getConsumerId()));
+    }
+
+    @PostMapping(APIConstants.NACK_MESSAGE)
+    public Response<String> nackMessage(@RequestBody NackRequest nackRequest){
+        return ResponseBuilder.createSuccessData(messageService.nackMessage(nackRequest.getMessageId(),nackRequest.getConsumerId(),nackRequest.getRequeue()));
     }
 }

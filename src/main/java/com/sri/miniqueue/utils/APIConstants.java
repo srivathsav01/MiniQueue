@@ -14,5 +14,6 @@ public interface APIConstants {
     String CONSUMER = "/consumer";
     String CONSUME_MESSAGE="/consumeMessage";
     String ACK_MESSAGE="/ackMessage";
+    String NACK_MESSAGE="/nackMessage";
 
 }

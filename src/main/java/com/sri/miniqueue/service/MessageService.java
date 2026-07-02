@@ -20,4 +20,6 @@ public interface MessageService {
     ConsumeResponse consumeMessage(String queueName, String consumerId) throws CustomException;
 
     String ackMessage(UUID messageId, String consumerId) throws CustomException;
+
+    String nackMessage(UUID messageId, String consumerId, boolean requeue) throws CustomException;
 }

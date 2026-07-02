@@ -35,7 +35,8 @@ public class RedeliveryScheduler {
         }
         AtomicInteger deadCount= new AtomicInteger(0);
         messages.forEach(msg->{
-            Integer retries = msg.getRetryCount()+1;
+            int current = msg.getRetryCount() != null ? msg.getRetryCount() : 0;
+            int retries = current+1;
             if(retries>=retryCount){
                 msg.setStatus(MessageStatus.DEAD);
                 deadCount.incrementAndGet();

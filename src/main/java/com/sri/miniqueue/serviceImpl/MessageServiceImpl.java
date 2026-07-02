@@ -118,5 +118,34 @@ public class MessageServiceImpl implements MessageService {
         return "Message acknowledged";
     }
 
+    @Override
+    public String nackMessage(UUID messageId, String consumerId, boolean requeue) throws CustomException {
+        Optional<Message> message = this.messageRepository.findById(messageId);
+        if(message.isEmpty()){
+            throw new CustomException("No message found with the id "+messageId);
+        }
+        if(message.get().getStatus()!=MessageStatus.UNACKED){
+            throw new CustomException("The message "+messageId+" is not in unacked state");
+        }
+        if(!message.get().getConsumerId().equals(consumerId)){
+            throw new CustomException("Invalid Consumer ID "+consumerId);
+        }
+        Message msg = message.get();
+        if(requeue){
+            msg.setStatus(MessageStatus.PENDING);
+            msg.setConsumerId(null);
+            msg.setUnackedAt(null);
+            this.messageRepository.save(msg);
+            return "Message reset to Pending";
+        }
+        else {
+            msg.setStatus(MessageStatus.DEAD);
+            int current = msg.getRetryCount() != null ? msg.getRetryCount() : 0;
+            msg.setRetryCount(current + 1);
+            this.messageRepository.save(msg);
+            return "Message set to Dead";
+        }
+    }
+
 
 }
