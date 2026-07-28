@@ -31,8 +31,11 @@ Producer
          │                        │
          ▼                        ▼
    consumer-service-01     consumer-service-02
-   GET /consume            GET /consume
-   POST /ack               POST /ack
+
+   Option A — Pull (REST polling)        Option B — Push (WebSocket)
+   GET /consume                          ws://localhost:8080/ws/consume?queue=queue-01
+   POST /ack                             → receives notification → calls GET /consume
+                                         → calls POST /ack
 ```
 
 ### Message Lifecycle (State Machine)
@@ -44,6 +47,28 @@ PENDING ──── consumed ────▶ UNACKED ──── acked ──�
 ```
 
 A message can only move forward through states. An `ACKED` message can never go back to `PENDING`. State transitions are enforced in the service layer.
+
+### WebSocket Notification Flow
+
+```
+Producer publishes message
+        ↓
+Broker saves message → status: PENDING
+        ↓
+NewMessageEvent fires internally
+        ↓
+WebSocketEventListener picks next session (round-robin)
+        ↓
+Pushes notification: { "queue": "queue-01", "event": "<payload preview>" }
+        ↓
+Consumer receives notification → calls GET /consume via REST
+        ↓
+Status transitions to UNACKED — claimed by consumer
+        ↓
+Consumer processes → calls POST /ack
+        ↓
+Status transitions to ACKED
+```
 
 ---
 
@@ -80,15 +105,116 @@ Each queue gets its own independent copy of the message. This means `email-queue
 
 If the application generates the timestamp, clock skew between multiple app instances could cause ordering issues. The database has one clock — so `published_at DEFAULT now()` guarantees consistent, trustworthy ordering within a queue.
 
+### Why WebSocket is used only for notification, not for status transition
+
+The alternative design — transitioning a message to `UNACKED` inside the WebSocket event listener on push — seems simpler at first. But it introduces a subtle reliability problem.
+
+If the broker marks a message `UNACKED` at push time, and the consumer crashes between receiving the notification and calling `GET /consume`, the message is stuck in `UNACKED` with no consumer actively holding it. The redelivery scheduler eventually rescues it, but the window of inconsistency is real.
+
+More importantly, this design duplicates the status transition logic. The `consumeMessage` service method already handles `PENDING → UNACKED` correctly — it sets the status, records the `consumerId`, and stamps `unackedAt` atomically. Replicating that logic in the WebSocket listener creates two code paths that must stay in sync.
+
+The chosen design keeps WebSocket as a **notification layer only**. The broker pushes a lightweight signal — "there is a message ready for you." The consumer responds by calling `GET /consume` via REST, which triggers the single, tested status transition path. The REST endpoint remains the sole source of truth for message state.
+
+This separation of concerns also handles the competing consumer case cleanly — if two consumers are connected to the same queue and both receive the notification, whoever calls `GET /consume` first claims the message. The second call naturally gets "no messages available." No coordination logic needed.
+
+### Why round-robin for WebSocket consumer selection
+
+When multiple consumers are connected to the same queue via WebSocket, the broker must decide who receives each notification. Sending to all of them would cause duplicate processing — each consumer would call `GET /consume` and compete, but the notification itself is redundant for all but one.
+
+Round-robin distributes notifications evenly across connected consumers using a per-queue `AtomicInteger` counter. This is thread-safe, stateless, and requires no coordination between consumers.
+
 ---
 
 ## Known Limitations
 
 - **No consumer authentication** — any client can consume from any queue by providing a consumer ID string. A production broker would require consumer registration and credential verification.
-- **No redelivery scheduler yet** — messages stuck in `UNACKED` state are not automatically redelivered on consumer crash. This is Phase 2.
-- **Single node only** — no horizontal scaling or clustering support.
+- **Single node only** — no horizontal scaling or clustering support. The WebSocket session registry is in-memory, so multiple broker instances would not share session state.
 - **No message TTL** — messages do not expire. A queue can grow unboundedly.
 - **No backpressure** — the broker does not limit how many messages a producer can publish.
+
+---
+
+## API Reference
+
+### REST Endpoints
+
+#### Create a Topic
+```
+POST /api/v1/topics
+Content-Type: application/json
+
+{ "name": "order.placed" }
+```
+
+#### Create a Queue
+```
+POST /api/v1/queues
+Content-Type: application/json
+
+{ "name": "email-queue", "topic_name": "order.placed" }
+```
+
+#### Publish a Message
+```
+POST /api/v1/messages/publish
+Content-Type: application/json
+
+{ "topic_name": "order.placed", "payload": "{\"orderId\": \"123\"}" }
+```
+
+#### Consume a Message (Pull)
+```
+GET /api/v1/consumer/consume?queue_name=email-queue&consumer_id=email-service
+```
+
+#### Acknowledge a Message
+```
+POST /api/v1/consumer/ack
+Content-Type: application/json
+
+{ "message_id": "<uuid>", "consumer_id": "email-service" }
+```
+
+#### Nack a Message
+```
+POST /api/v1/consumer/nack
+Content-Type: application/json
+
+{ "message_id": "<uuid>", "consumer_id": "email-service", "requeue": true }
+```
+
+Set `requeue: true` to reset to `PENDING`. Set `requeue: false` to move directly to `DEAD`.
+
+### WebSocket (Push)
+
+Connect to receive real-time notifications when messages arrive in a queue:
+```
+ws://localhost:8080/ws/consume?queue=email-queue
+```
+
+Notification format:
+```json
+{ "queue": "email-queue", "event": "<payload preview...>" }
+```
+
+On receiving a notification, call `GET /consume` via REST to claim and process the message.
+
+### Error Responses
+
+All errors return a consistent shape:
+```json
+{
+  "status": 400,
+  "message": "No Topic found with the name order.placed",
+  "errors": null,
+  "response_body": null
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `400` | Client error — invalid input, resource not found, wrong state |
+| `500` | Server error — unexpected failure |
 
 ---
 
@@ -134,17 +260,17 @@ spring:
 The broker starts on `http://localhost:8080`.
 
 **5. Verify**
+
 Open the Swagger UI in your browser:
 ```
 http://localhost:8080/swagger-ui/index.html
 ```
-All endpoints are documented and executable directly from the browser.
+
+All REST endpoints are documented and executable directly from the browser. To test WebSocket, use Postman's WebSocket client and connect to `ws://localhost:8080/ws/consume?queue=your-queue-name`.
 
 ---
 
 ## Roadmap
 
-- **Phase 2** — Redelivery scheduler, retry counter, dead-letter queue, `POST /nack`
-- **Phase 3** — WebSocket push-based consumption (no polling)
 - **Phase 4** — Operations dashboard — queue depths, DLQ inspector, message replay
 - **Phase 5** — Docker Compose, Prometheus metrics, Grafana dashboards, CI/CD pipeline
