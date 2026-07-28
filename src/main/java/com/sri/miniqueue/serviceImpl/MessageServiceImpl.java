@@ -4,6 +4,7 @@ import com.sri.miniqueue.dto.ConsumeResponse;
 import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
 import com.sri.miniqueue.entity.Topic;
+import com.sri.miniqueue.event.NewMessageEvent;
 import com.sri.miniqueue.exception.CustomException;
 import com.sri.miniqueue.repository.MessageRepository;
 import com.sri.miniqueue.repository.QueueRepository;
@@ -12,6 +13,7 @@ import com.sri.miniqueue.service.MessageService;
 import com.sri.miniqueue.to.MessageStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -29,6 +31,8 @@ public class MessageServiceImpl implements MessageService {
     private final QueueRepository queueRepository;
 
     private final TopicRepository topicRepository;
+
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public Topic createTopic(String name) throws CustomException {
@@ -66,15 +70,20 @@ public class MessageServiceImpl implements MessageService {
         if(queueList.isEmpty()){
             throw new CustomException("No Queues are bound to the topic "+ topicName);
         }
-        List<Message> messages = new ArrayList<>();
         queueList.forEach(queue->{
             Message message = new Message();
             message.setPayload(payload);
             message.setQueue(queue);
             message.setStatus(MessageStatus.PENDING);
-            messages.add(message);
+            Message saved = this.messageRepository.save(message);
+            ConsumeResponse response = ConsumeResponse.builder()
+                    .messageId(saved.getId())
+                    .payload(saved.getPayload())
+                    .queueName(queue.getName())
+                    .publishedAt(saved.getPublishedAt())
+                    .build();
+            eventPublisher.publishEvent(new NewMessageEvent(response,queue.getName()));
         });
-        this.messageRepository.saveAll(messages);
     }
 
     @Override
