@@ -1,5 +1,6 @@
 package com.sri.miniqueue.repository;
 
+import com.sri.miniqueue.dto.MessageStatusCount;
 import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
 import com.sri.miniqueue.to.MessageStatus;
@@ -21,4 +22,8 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 
     @Query("SELECT m FROM Message m WHERE m.status = :status AND m.unackedAt < :cutoff")
     List<Message> findStuckMessages(@Param("status") MessageStatus status, @Param("cutoff")LocalDateTime cutoff);
+
+    @Query("SELECT m.queue.id as queueId, m.status as status, COUNT(m) as count " +
+            "FROM Message m GROUP BY m.queue.id, m.status")
+    List<MessageStatusCount> countByQueueAndStatus();
 }
