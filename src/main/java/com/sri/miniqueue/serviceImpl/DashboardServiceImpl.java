@@ -4,11 +4,14 @@ import com.sri.miniqueue.dto.DashboardOverviewResponse;
 import com.sri.miniqueue.dto.DlqMessageResponse;
 import com.sri.miniqueue.dto.MessageStatusCount;
 import com.sri.miniqueue.dto.QueueStatsResponse;
+import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
+import com.sri.miniqueue.exception.CustomException;
 import com.sri.miniqueue.repository.MessageRepository;
 import com.sri.miniqueue.repository.QueueRepository;
 import com.sri.miniqueue.repository.TopicRepository;
 import com.sri.miniqueue.service.DashboardService;
+import com.sri.miniqueue.to.MessageStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -55,7 +58,7 @@ public class DashboardServiceImpl implements DashboardService {
         Map<UUID,List<MessageStatusCount>> stats = messages.stream()
                 .collect(Collectors.groupingBy(MessageStatusCount::getQueueId));
         List<QueueStatsResponse> result = new ArrayList<>();
-        stats.forEach((UUID id,List<MessageStatusCount> counts)->{
+        stats.forEach((UUID id,List<MessageStatusCount> counts)-> {
             Queue q = queueMap.get(id);
             if (q != null) {
                 QueueStatsResponse queueStatsResponse = new QueueStatsResponse();
@@ -77,11 +80,32 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public List<DlqMessageResponse> getDeadLetterMessages() {
-        return List.of();
+        return messageRepository.findDeadMessages(MessageStatus.DEAD)
+                .stream()
+                .map(msg-> DlqMessageResponse.builder()
+                        .messageId(msg.getId())
+                        .queueName(msg.getQueue().getName())
+                        .payload(msg.getPayload())
+                        .consumerId(msg.getConsumerId())
+                        .retryCount(msg.getRetryCount())
+                        .unackedAt(msg.getUnackedAt())
+                        .build())
+                .collect(Collectors.toList());
     }
 
     @Override
     public String replayMessage(UUID messageId) {
-        return "";
+        Optional<Message> msg = messageRepository.findById(messageId);
+        if(msg.isEmpty()) {
+            throw new CustomException("No message found with id " + messageId);
+        }
+        if(msg.get().getStatus() != MessageStatus.DEAD) {
+            throw new CustomException("Only DEAD messages can be replayed");
+        }
+        msg.get().setStatus(MessageStatus.PENDING);
+        msg.get().setConsumerId(null);
+        msg.get().setUnackedAt(null);
+        messageRepository.save(msg.get());
+        return "Reset Message "+messageId+" to PENDING";
     }
 }

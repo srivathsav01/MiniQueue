@@ -16,4 +16,10 @@ public interface APIConstants {
     String ACK_MESSAGE="/ackMessage";
     String NACK_MESSAGE="/nackMessage";
 
+    String DASHBOARD = "/dashboard";
+    String OVERVIEW = "/overview";
+    String QUEUES = "/queues";
+    String DLQ = "/dlq";
+    String REPLAY = "/replay";
+
 }

@@ -26,4 +26,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     @Query("SELECT m.queue.id as queueId, m.status as status, COUNT(m) as count " +
             "FROM Message m GROUP BY m.queue.id, m.status")
     List<MessageStatusCount> countByQueueAndStatus();
+
+    @Query("SELECT m FROM Message m WHERE m.status = :status")
+    List<Message> findDeadMessages(@Param("status") MessageStatus status);
 }
