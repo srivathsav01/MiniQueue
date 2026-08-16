@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import type { QueueStats } from "@/types/dashboard";
 import { getQueueStats } from "@/api/dashboard";
+import { useRefresh } from "@/context/RefreshContext";
 
 function StatusCell({
   value,
@@ -59,13 +60,15 @@ export default function QueueStats() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
+  const refreshKey = useRefresh();
 
   useEffect(() => {
+    setLoading(true);
       getQueueStats()
       .then(setData)
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshKey]);
 
   if (error) {
     return (

@@ -13,7 +13,7 @@ function getDlqMessages(): Promise<DlqMessage[]> {
     return apiClient.get<ApiResponse<DlqMessage[]>>("/dashboard/dlq").then((response) => response.data.response_body);
 }
 
-function replayMessage(messageId: string): Promise<String> {
+function replayDlqMessage(messageId: string): Promise<String> {
     return apiClient.post<ApiResponse<String>>(`/dashboard/dlq/${messageId}/replay`).then((response) => response.data.response_body);
 }
 
@@ -21,5 +21,5 @@ export {
     getOverview,
     getQueueStats,
     getDlqMessages,
-    replayMessage,
+    replayDlqMessage,
 };

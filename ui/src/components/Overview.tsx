@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { DashboardOverview } from "../types/dashboard";
 import { getOverview } from "@/api/dashboard";
+import { useRefresh } from "@/context/RefreshContext";
 
 const statCards = (data: DashboardOverview) => [
   {
@@ -112,13 +113,15 @@ export default function Overview() {
   const [data, setData] = useState<DashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
+  const refreshKey = useRefresh();
+  
   useEffect(() => {
+    setLoading(true);
     getOverview()
       .then(setData)
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshKey]);
 
   if (error) {
     return (

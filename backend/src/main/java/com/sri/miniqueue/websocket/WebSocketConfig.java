@@ -14,9 +14,14 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     private final MiniQueueWebSocketHandler miniQueueWebSocketHandler;
 
+    private final MonitorWebSocketHandler monitorWebSocketHandler;
+
     @Override
     public void registerWebSocketHandlers(@NonNull WebSocketHandlerRegistry registry) {
         registry.addHandler(miniQueueWebSocketHandler,"/ws/consume")
+                .setAllowedOrigins("*");
+
+        registry.addHandler(monitorWebSocketHandler,"/ws/monitor")
                 .setAllowedOrigins("*");
     }
 }

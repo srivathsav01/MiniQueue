@@ -6,6 +6,8 @@ import com.sri.miniqueue.dto.MessageStatusCount;
 import com.sri.miniqueue.dto.QueueStatsResponse;
 import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
+import com.sri.miniqueue.event.BrokerActivityEvent;
+import com.sri.miniqueue.event.BrokerEventType;
 import com.sri.miniqueue.exception.CustomException;
 import com.sri.miniqueue.repository.MessageRepository;
 import com.sri.miniqueue.repository.QueueRepository;
@@ -13,8 +15,10 @@ import com.sri.miniqueue.repository.TopicRepository;
 import com.sri.miniqueue.service.DashboardService;
 import com.sri.miniqueue.to.MessageStatus;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -28,6 +32,8 @@ public class DashboardServiceImpl implements DashboardService {
     private final TopicRepository topicRepository;
 
     private final QueueRepository queueRepository;
+
+    private final MessageServiceImpl messageService;
 
     @Override
     public DashboardOverviewResponse getOverview() {
@@ -95,17 +101,6 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public String replayMessage(UUID messageId) {
-        Optional<Message> msg = messageRepository.findById(messageId);
-        if(msg.isEmpty()) {
-            throw new CustomException("No message found with id " + messageId);
-        }
-        if(msg.get().getStatus() != MessageStatus.DEAD) {
-            throw new CustomException("Only DEAD messages can be replayed");
-        }
-        msg.get().setStatus(MessageStatus.PENDING);
-        msg.get().setConsumerId(null);
-        msg.get().setUnackedAt(null);
-        messageRepository.save(msg.get());
-        return "Reset Message "+messageId+" to PENDING";
+        return messageService.replayMessage(messageId);
     }
 }

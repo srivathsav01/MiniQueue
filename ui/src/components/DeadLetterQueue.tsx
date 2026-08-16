@@ -1,4 +1,4 @@
-import { getDlqMessages } from "@/api/dashboard";
+import { getDlqMessages, replayDlqMessage } from "@/api/dashboard";
 import type { DlqMessage } from "@/types/dashboard";
 import { useEffect, useState } from "react";
 import {
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Repeat2 } from 'lucide-react';
 import { toast } from "sonner";
 import { useConfirmDialog } from "@/context/ConfirmDialogContext";
+import { useRefresh } from "@/context/RefreshContext";
 
 function StatusCell({
     value,
@@ -63,15 +64,16 @@ export default function DeadLetterQueueStats() {
     const [error, setError] = useState<string | null>(null);
     const [replayingId, setReplayingId] = useState<string | null>(null);
     const { openConfirmDialog } = useConfirmDialog();
-
+    const { triggerRefresh } = useRefresh();
     const replayMessage = async (messageId: string) => {
         setReplayingId(messageId);
         try {
-            await replayMessage(messageId);
+            await replayDlqMessage(messageId);
             setData((prevData) => prevData?.filter((msg) => msg.messageId !== messageId) || null);
             toast.success("Message reset to PENDING", {
                 description: `${messageId.substring(0, 10)}... is back in the queue.`,
             });
+            triggerRefresh();
         } catch (err) {
             toast.error("Failed to replay message", {
                 description: err instanceof Error ? err.message : "Something went wrong.",
@@ -82,6 +84,7 @@ export default function DeadLetterQueueStats() {
     }
 
     useEffect(() => {
+        setLoading(true);
         getDlqMessages()
             .then(setData)
             .catch((err: Error) => setError(err.message))
