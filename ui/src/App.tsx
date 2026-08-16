@@ -5,6 +5,7 @@ import DeadLetterQueueStats from './components/DeadLetterQueue'
 import { Toaster } from "@/components/ui/sonner"
 import { ConfirmDialogProvider } from './context/ConfirmDialogContext'
 import { RefreshProvider } from './context/RefreshContext'
+import LiveActivity from './components/LiveActivity'
 
 function App() {
 
@@ -15,6 +16,7 @@ function App() {
         <Overview />
         <QueueStats />
         <DeadLetterQueueStats />
+        {/* <LiveActivity /> */}
         <Toaster />
         </RefreshProvider>
       </ConfirmDialogProvider>
