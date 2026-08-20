@@ -70,6 +70,18 @@ Consumer processes → calls POST /ack
 Status transitions to ACKED
 ```
 
+### Monitor WebSocket Flow
+
+```
+Dashboard connects to ws://localhost:8080/ws/monitor
+        ↓
+Every broker state transition fires a BrokerActivityEvent
+        ↓
+MonitorEventListener broadcasts event to all connected dashboards
+        ↓
+Dashboard renders event in real-time activity feed
+```
+
 ---
 
 ## Tech Stack
@@ -80,6 +92,22 @@ Status transitions to ACKED
 | Database | PostgreSQL 16 | Durable message storage with JSONB payload support |
 | ORM | Spring Data JPA / Hibernate | Type-safe database access |
 | Language | Java 21 | LTS release, modern language features |
+| Frontend | React + TypeScript | Operations dashboard |
+| Styling | Tailwind CSS + Shadcn/ui | Component library and utility styling |
+
+---
+
+## Dashboard
+
+The operations dashboard provides real-time visibility into the broker's internals.
+
+**Overview** — broker-wide message counts broken down by status.
+
+**Queue Breakdown** — per-queue message counts with color-coded status columns. Dead message counts are highlighted in bold to draw operator attention.
+
+**Dead Letter Queue Inspector** — all dead messages with their last consumer, retry count, and timestamp. Operators can replay any dead message back to `PENDING` with a single click and confirmation dialog.
+
+**Live Activity Feed** — a real-time scrolling feed of all broker events (published, consumed, acked, nacked, redelivered, dead, replayed) received via a dedicated `/ws/monitor` WebSocket. Shows event type, queue name, detail, and timestamp. Capped at 50 events with auto-scroll.
 
 ---
 
@@ -122,6 +150,18 @@ This separation of concerns also handles the competing consumer case cleanly —
 When multiple consumers are connected to the same queue via WebSocket, the broker must decide who receives each notification. Sending to all of them would cause duplicate processing — each consumer would call `GET /consume` and compete, but the notification itself is redundant for all but one.
 
 Round-robin distributes notifications evenly across connected consumers using a per-queue `AtomicInteger` counter. This is thread-safe, stateless, and requires no coordination between consumers.
+
+### Why a dedicated `/ws/monitor` endpoint instead of reusing `/ws/consume`
+
+Consumer WebSocket and monitor WebSocket serve different audiences with different data needs. `/ws/consume` is for delivery — it carries message notifications to a specific queue's consumers. `/ws/monitor` is for observability — it broadcasts all broker activity to dashboards.
+
+Mixing them would mean the dashboard has to connect to every queue individually, and consumer clients would receive irrelevant monitoring events. Separation keeps both clean and independently evolvable.
+
+### Why dashboard aggregations run in the database, not in Java
+
+Fetching all message rows into Java memory and counting them there would be catastrophically inefficient at scale. A queue with 100,000 messages would require 100,000 rows transferred over the network just to produce a count.
+
+PostgreSQL's `GROUP BY` with `COUNT()` computes aggregations in a single scan without moving data anywhere. The database returns one row per status per queue — a handful of integers regardless of message volume. Computation lives where the data lives.
 
 ---
 
@@ -185,9 +225,31 @@ Content-Type: application/json
 
 Set `requeue: true` to reset to `PENDING`. Set `requeue: false` to move directly to `DEAD`.
 
-### WebSocket (Push)
+### Dashboard Endpoints
 
-Connect to receive real-time notifications when messages arrive in a queue:
+#### Broker Overview
+```
+GET /api/v1/dashboard/overview
+```
+
+#### Queue Breakdown
+```
+GET /api/v1/dashboard/queues
+```
+
+#### Dead Letter Queue
+```
+GET /api/v1/dashboard/dlq
+```
+
+#### Replay a Dead Message
+```
+POST /api/v1/dashboard/dlq/{messageId}/replay
+```
+
+### WebSocket
+
+#### Consumer Notifications (Push-based consumption)
 ```
 ws://localhost:8080/ws/consume?queue=email-queue
 ```
@@ -198,6 +260,23 @@ Notification format:
 ```
 
 On receiving a notification, call `GET /consume` via REST to claim and process the message.
+
+#### Monitor Feed (Dashboard)
+```
+ws://localhost:8080/ws/monitor
+```
+
+Event format:
+```json
+{
+  "eventType": "PUBLISHED",
+  "queueName": "email-queue",
+  "detail": "Message published to email-queue",
+  "timestamp": "2026-06-24T10:00:00"
+}
+```
+
+Event types: `PUBLISHED`, `CONSUMED`, `ACKED`, `NACKED`, `REDELIVERED`, `DEAD`, `REPLAYED`.
 
 ### Error Responses
 
@@ -225,8 +304,9 @@ All errors return a consistent shape:
 - Java 21
 - PostgreSQL 16
 - Maven
+- Node.js 20+
 
-### Setup
+### Backend Setup
 
 **1. Clone the repository**
 ```bash
@@ -252,7 +332,7 @@ spring:
     password: your_postgres_password
 ```
 
-**4. Run**
+**4. Run the backend**
 ```bash
 ./mvnw spring-boot:run
 ```
@@ -266,11 +346,31 @@ Open the Swagger UI in your browser:
 http://localhost:8080/swagger-ui/index.html
 ```
 
-All REST endpoints are documented and executable directly from the browser. To test WebSocket, use Postman's WebSocket client and connect to `ws://localhost:8080/ws/consume?queue=your-queue-name`.
+All REST endpoints are documented and executable directly from the browser.
+
+### Dashboard Setup
+
+**1. Navigate to the dashboard directory**
+```bash
+cd miniqueue-dashboard
+```
+
+**2. Install dependencies**
+```bash
+npm install
+```
+
+**3. Start the development server**
+```bash
+npm run dev
+```
+
+The dashboard opens at `http://localhost:5173`.
+
+To test the monitor WebSocket independently, use Postman's WebSocket client and connect to `ws://localhost:8080/ws/monitor`.
 
 ---
 
 ## Roadmap
 
-- **Phase 4** — Operations dashboard — queue depths, DLQ inspector, message replay
-- **Phase 5** — Docker Compose, Prometheus metrics, Grafana dashboards, CI/CD pipeline
+- **Phase 5** — Docker Compose, Prometheus metrics, Grafana dashboards, CI/CD pipeline, deployment
