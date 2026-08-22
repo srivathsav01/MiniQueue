@@ -1,5 +1,5 @@
 import { ROUTE_CONSTANTS, Routes } from "@/lib/routes";
-import { Moon, Ship, Sun, User } from "lucide-react";
+import { Moon, Ship, Sun } from "lucide-react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 
 function Header() {
