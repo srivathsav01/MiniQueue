@@ -28,7 +28,7 @@ public class RedeliveryScheduler {
     @Value("${miniqueue.redelivery.timeout-minutes}")
     private int timeoutMinutes;
 
-    @Value("${miniqueue.redelivery.max-tries}")
+    @Value("${miniqueue.redelivery.max-retries}")
     private int retryCount;
 
     @Scheduled(fixedDelayString = "${miniqueue.redelivery.fixed-delay-ms}")
