@@ -32,5 +32,4 @@ build/
 ### VS Code ###
 .vscode/
 .gitignore
-backend/src/main/resources/application.yaml
 .env
