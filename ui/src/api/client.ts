@@ -1,4 +1,5 @@
 import axios from "axios";
+import { toast } from "sonner";
 
 const apiClient = axios.create({
     baseURL: "/",
@@ -13,6 +14,9 @@ apiClient.interceptors.response.use(
     (error) => {
         const message = error.response?.data?.message || "Something went wrong";
         console.error("API Error:", message);
+        toast.error("API Error", {
+            description: message,
+        });
         return Promise.reject(new Error(message));
     }
 );

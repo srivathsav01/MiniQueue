@@ -8,6 +8,7 @@ import com.sri.miniqueue.event.BrokerActivityEvent;
 import com.sri.miniqueue.event.BrokerEventType;
 import com.sri.miniqueue.event.NewMessageEvent;
 import com.sri.miniqueue.exception.CustomException;
+import com.sri.miniqueue.metrics.BrokerMetrics;
 import com.sri.miniqueue.repository.MessageRepository;
 import com.sri.miniqueue.repository.QueueRepository;
 import com.sri.miniqueue.repository.TopicRepository;
@@ -36,6 +37,8 @@ public class MessageServiceImpl implements MessageService {
 
     private final ApplicationEventPublisher eventPublisher;
 
+    private final BrokerMetrics brokerMetrics;
+
     @Override
     public Topic createTopic(String name) throws CustomException {
         if(this.topicRepository.findTopicByName(name.toLowerCase()).isPresent()){
@@ -59,6 +62,7 @@ public class MessageServiceImpl implements MessageService {
                 .name(name.toLowerCase())
                 .topic(topic.get())
                 .build();
+        brokerMetrics.registerQueueDepthGauge(name.toLowerCase(),messageRepository);
         return this.queueRepository.save(queue);
     }
 
@@ -86,6 +90,7 @@ public class MessageServiceImpl implements MessageService {
                     .build();
             eventPublisher.publishEvent(new NewMessageEvent(response,queue.getName()));
             eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.PUBLISHED,queue.getName(),"Message published to "+queue.getName(),LocalDateTime.now()));
+            brokerMetrics.incrementPublished();
         });
     }
 
@@ -105,6 +110,7 @@ public class MessageServiceImpl implements MessageService {
         msg.setUnackedAt(LocalDateTime.now());
         this.messageRepository.save(msg);
         eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CONSUMED,queueName,"Message consumed by "+ consumerId,LocalDateTime.now()));
+        brokerMetrics.incrementConsumed();
         ConsumeResponse consumeResponse = new ConsumeResponse();
         consumeResponse.setMessageId(msg.getId());
         consumeResponse.setPayload(msg.getPayload());
@@ -129,6 +135,7 @@ public class MessageServiceImpl implements MessageService {
         msg.setStatus(MessageStatus.ACKED);
         this.messageRepository.save(msg);
         eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.ACKED,msg.getQueue().getName(),"Message acked by "+ consumerId,LocalDateTime.now()));
+        brokerMetrics.incrementAcked();
         return "Message acknowledged";
     }
 
@@ -151,6 +158,7 @@ public class MessageServiceImpl implements MessageService {
             msg.setUnackedAt(null);
             this.messageRepository.save(msg);
             eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.NACKED,msg.getQueue().getName(),"Message nacked by "+ consumerId,LocalDateTime.now()));
+            brokerMetrics.incrementNacked();
             return "Message reset to Pending";
         }
         else {
@@ -159,6 +167,7 @@ public class MessageServiceImpl implements MessageService {
             msg.setRetryCount(current + 1);
             this.messageRepository.save(msg);
             eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.DEAD,msg.getQueue().getName(),"Message " +msg.getId()+ "set to dead ",LocalDateTime.now()));
+            brokerMetrics.incrementDead();
             return "Message set to Dead";
         }
     }
@@ -176,6 +185,7 @@ public class MessageServiceImpl implements MessageService {
         msg.get().setUnackedAt(null);
         messageRepository.save(msg.get());
         eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.REPLAYED,msg.get().getQueue().getName(),"Message replayed from DLQ", LocalDateTime.now()));
+        brokerMetrics.incrementRedelivered();
         return "Reset Message "+messageId+" to PENDING";
     }
 }

@@ -137,9 +137,11 @@ export default function LiveActivity() {
   const [events, setEvents] = useState<BrokerEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8080/ws/monitor");
+    const ws = new WebSocket(`${protocol}//${host}/ws/monitor`);
 
     ws.onopen = () => setConnected(true);
 
