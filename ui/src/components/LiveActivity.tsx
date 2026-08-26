@@ -138,10 +138,9 @@ export default function LiveActivity() {
   const [connected, setConnected] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
-
+  const wsBase = import.meta.env.VITE_WS_BASE_URL || window.location.host;
   useEffect(() => {
-    const ws = new WebSocket(`${protocol}//${host}/ws/monitor`);
+    const ws = new WebSocket(`${protocol}//${wsBase}/ws/monitor`);
 
     ws.onopen = () => setConnected(true);
 
