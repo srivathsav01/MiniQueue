@@ -7,5 +7,6 @@ public enum BrokerEventType {
     NACKED,
     REDELIVERED,
     DEAD,
-    REPLAYED
+    REPLAYED,
+    CREATED
 }

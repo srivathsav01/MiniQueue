@@ -32,3 +32,10 @@ export interface ApiResponse<T> {
     response_body: T;
     errors?: string[];
 }
+
+export interface BrokerEvent {
+  eventType: string;
+  queueName: string;
+  detail: string;
+  timestamp: string;
+}

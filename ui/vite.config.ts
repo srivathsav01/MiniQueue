@@ -15,7 +15,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/dashboard': 'http://localhost:8080'
+      '/dashboard': 'http://localhost:8080',
+      '/ws': {
+        target: 'http://localhost:8080',
+        ws: true,
+        changeOrigin: true
+      }
     }
   },
 })

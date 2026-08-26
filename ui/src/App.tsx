@@ -6,6 +6,7 @@ import LiveActivity from './components/LiveActivity'
 import AppLayout from './page/AppLayout'
 import OverviewPage from './page/OverviewPage'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { MonitorWebSocketProvider } from './context/MonitorWebSocketContext'
 
 
 function App() {
@@ -23,8 +24,10 @@ function App() {
     <>
     <ConfirmDialogProvider>
       <RefreshProvider>
-        <RouterProvider router={router} />
-        <Toaster />
+        <MonitorWebSocketProvider>
+          <RouterProvider router={router} />
+          <Toaster />
+        </MonitorWebSocketProvider>
         </RefreshProvider>
       </ConfirmDialogProvider>
     </>

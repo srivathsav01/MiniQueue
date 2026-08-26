@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-
-// --- Types ---
-
-interface BrokerEvent {
-  eventType: string;
-  queueName: string;
-  detail: string;
-  timestamp: string;
-}
+import type { BrokerEvent } from "@/types/dashboard";
+import { useMonitorWebSocket } from "@/context/MonitorWebSocketContext";
 
 // --- Constants ---
 
@@ -51,6 +44,11 @@ const EVENT_STYLES: Record<
     badge: "bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-400 border-teal-200 dark:border-teal-800",
     dot: "bg-teal-400",
   },
+  CREATED: {
+    label: "Created",
+    badge: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-400 border-green-200 dark:border-green-800",
+    dot: "bg-green-400",
+  }
 };
 
 const DEFAULT_STYLE = {
@@ -134,33 +132,9 @@ function EventRow({ event }: { event: BrokerEvent }) {
 // --- Main Component ---
 
 export default function LiveActivity() {
-  const [events, setEvents] = useState<BrokerEvent[]>([]);
-  const [connected, setConnected] = useState(false);
+  const { events, connected } = useMonitorWebSocket();
   const bottomRef = useRef<HTMLDivElement>(null);
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsBase = import.meta.env.VITE_WS_BASE_URL || window.location.host;
-  useEffect(() => {
-    const ws = new WebSocket(`${protocol}//${wsBase}/ws/monitor`);
 
-    ws.onopen = () => setConnected(true);
-
-    ws.onclose = () => setConnected(false);
-
-    ws.onerror = () => setConnected(false);
-
-    ws.onmessage = (event) => {
-      try {
-        const data: BrokerEvent = JSON.parse(event.data);
-        setEvents((prev) => [...prev.slice(-49), data]);
-      } catch {
-        // malformed event — ignore
-      }
-    };
-
-    return () => ws.close();
-  }, []);
-
-  // Auto-scroll to bottom on new events
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [events]);
@@ -177,14 +151,6 @@ export default function LiveActivity() {
             {events.length} event{events.length !== 1 ? "s" : ""}
           </span>
           <ConnectionStatus connected={connected} />
-          {events.length > 0 && (
-            <button
-              onClick={() => setEvents([])}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Clear
-            </button>
-          )}
         </div>
       </div>
 

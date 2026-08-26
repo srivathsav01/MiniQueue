@@ -7,7 +7,7 @@ app:
 
 miniqueue:
   redelivery:
-    timeout-minutes: 1
+    timeout-minutes: 10
     fixed-delay-ms: 60000
     max-retries: 3
 

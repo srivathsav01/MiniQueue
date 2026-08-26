@@ -15,7 +15,9 @@ function Header() {
             <div className="nav w-64 hidden md:block">
                     <ul className="flex flex-col md:flex-row gap-6 text-lg font-extralight">
                         {Routes.map(({ path, label }) => {
-                            const isActive = pathname === path;
+                            const isActive = path === "/home" || path === "/"
+                                ? pathname === "/" || pathname === "/home"
+                                : pathname === path;
                             return (
                                 <li key={path} className={`relative cursor-pointer ${isActive ? "text-textprimary font-semibold underline underline-offset-3" : ""}`}>
                                     <NavLink

@@ -46,6 +46,7 @@ public class MessageServiceImpl implements MessageService {
         }
         Topic topic = new Topic();
         topic.setName(name.toLowerCase());
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED,"","New Topic "+name+" created",LocalDateTime.now()));
         return this.topicRepository.save(topic);
     }
 
@@ -63,6 +64,7 @@ public class MessageServiceImpl implements MessageService {
                 .topic(topic.get())
                 .build();
         brokerMetrics.registerQueueDepthGauge(name.toLowerCase(),messageRepository);
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED,name,"New Queue "+name+" created for topic "+topicName,LocalDateTime.now()));
         return this.queueRepository.save(queue);
     }
 
@@ -89,7 +91,7 @@ public class MessageServiceImpl implements MessageService {
                     .publishedAt(saved.getPublishedAt())
                     .build();
             eventPublisher.publishEvent(new NewMessageEvent(response,queue.getName()));
-            eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.PUBLISHED,queue.getName(),"Message published to "+queue.getName(),LocalDateTime.now()));
+            eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.PUBLISHED,queue.getName(),"Message "+saved.getId()+" published to "+queue.getName(),LocalDateTime.now()));
             brokerMetrics.incrementPublished();
         });
     }
@@ -109,7 +111,7 @@ public class MessageServiceImpl implements MessageService {
         msg.setConsumerId(consumerId);
         msg.setUnackedAt(LocalDateTime.now());
         this.messageRepository.save(msg);
-        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CONSUMED,queueName,"Message consumed by "+ consumerId,LocalDateTime.now()));
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CONSUMED,queueName,"Message "+msg.getId()+" consumed by "+ consumerId,LocalDateTime.now()));
         brokerMetrics.incrementConsumed();
         ConsumeResponse consumeResponse = new ConsumeResponse();
         consumeResponse.setMessageId(msg.getId());
@@ -134,7 +136,7 @@ public class MessageServiceImpl implements MessageService {
         Message msg = message.get();
         msg.setStatus(MessageStatus.ACKED);
         this.messageRepository.save(msg);
-        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.ACKED,msg.getQueue().getName(),"Message acked by "+ consumerId,LocalDateTime.now()));
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.ACKED,msg.getQueue().getName(),"Message "+msg.getId()+" acked by "+ consumerId,LocalDateTime.now()));
         brokerMetrics.incrementAcked();
         return "Message acknowledged";
     }
@@ -157,7 +159,7 @@ public class MessageServiceImpl implements MessageService {
             msg.setConsumerId(null);
             msg.setUnackedAt(null);
             this.messageRepository.save(msg);
-            eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.NACKED,msg.getQueue().getName(),"Message nacked by "+ consumerId,LocalDateTime.now()));
+            eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.NACKED,msg.getQueue().getName(),"Message "+msg.getId()+" nacked by "+ consumerId,LocalDateTime.now()));
             brokerMetrics.incrementNacked();
             return "Message reset to Pending";
         }
@@ -184,7 +186,7 @@ public class MessageServiceImpl implements MessageService {
         msg.get().setConsumerId(null);
         msg.get().setUnackedAt(null);
         messageRepository.save(msg.get());
-        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.REPLAYED,msg.get().getQueue().getName(),"Message replayed from DLQ", LocalDateTime.now()));
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.REPLAYED,msg.get().getQueue().getName(),"Message "+msg.get().getId()+" replayed from DLQ", LocalDateTime.now()));
         brokerMetrics.incrementRedelivered();
         return "Reset Message "+messageId+" to PENDING";
     }
