@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { BrokerEvent } from "@/types/dashboard";
 import { useMonitorWebSocket } from "@/context/MonitorWebSocketContext";
