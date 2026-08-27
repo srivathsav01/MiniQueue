@@ -2,6 +2,9 @@
 
 A lightweight message broker built from scratch with **at-least-once delivery semantics**, topic-based fan-out, and explicit consumer acknowledgement. Inspired by RabbitMQ's core concepts — built to understand them from the inside out.
 
+**Live Demo:** https://miniqueue.onrender.com  
+**API Explorer:** https://miniqueue-backend.onrender.com/swagger-ui/index.html
+
 ---
 
 ## What it is
@@ -17,7 +20,7 @@ This is the core guarantee that makes distributed systems reliable: **at-least-o
 ```
 Producer
    │
-   │  POST /messages/publish
+   │  POST /messages/publishMessage
    ▼
 ┌─────────────────────────────────────────┐
 │               Miniqueue Broker          │
@@ -33,8 +36,8 @@ Producer
    consumer-service-01     consumer-service-02
 
    Option A — Pull (REST polling)        Option B — Push (WebSocket)
-   GET /consume                          ws://localhost:8080/ws/consume?queue=queue-01
-   POST /ack                             → receives notification → calls GET /consume
+   GET /consumer/consumeMessage          ws://<host>/ws/consume?queue=queue-01
+   POST /consumer/ackMessage             → receives notification → calls GET /consume
                                          → calls POST /ack
 ```
 
@@ -73,7 +76,7 @@ Status transitions to ACKED
 ### Monitor WebSocket Flow
 
 ```
-Dashboard connects to ws://localhost:8080/ws/monitor
+Dashboard connects to ws://<host>/ws/monitor
         ↓
 Every broker state transition fires a BrokerActivityEvent
         ↓
@@ -92,22 +95,34 @@ Dashboard renders event in real-time activity feed
 | Database | PostgreSQL 16 | Durable message storage with JSONB payload support |
 | ORM | Spring Data JPA / Hibernate | Type-safe database access |
 | Language | Java 21 | LTS release, modern language features |
-| Frontend | React + TypeScript | Operations dashboard |
+| Frontend | React + TypeScript | Operations and management dashboard |
 | Styling | Tailwind CSS + Shadcn/ui | Component library and utility styling |
+| Observability | Prometheus + Grafana | Metrics collection and visualization |
+| Containerization | Docker + Docker Compose | Single-command stack deployment |
 
 ---
 
 ## Dashboard
 
-The operations dashboard provides real-time visibility into the broker's internals.
+The operations and management dashboard provides real-time visibility and full broker control.
 
-**Overview** — broker-wide message counts broken down by status.
+### Operations
 
-**Queue Breakdown** — per-queue message counts with color-coded status columns. Dead message counts are highlighted in bold to draw operator attention.
+**Overview** — broker-wide message counts broken down by status (pending, unacked, acked, dead). Auto-refreshes on every broker event via WebSocket.
 
-**Dead Letter Queue Inspector** — all dead messages with their last consumer, retry count, and timestamp. Operators can replay any dead message back to `PENDING` with a single click and confirmation dialog.
+**Queue Breakdown** — per-queue message counts with color-coded status columns. Click any queue row to inspect its messages inline as compact horizontal cards. Dead counts are highlighted in bold.
 
-**Live Activity Feed** — a real-time scrolling feed of all broker events (published, consumed, acked, nacked, redelivered, dead, replayed) received via a dedicated `/ws/monitor` WebSocket. Shows event type, queue name, detail, and timestamp. Capped at 50 events with auto-scroll.
+**Dead Letter Queue Inspector** — all dead messages with their last consumer, retry count, and timestamp. Replay any dead message back to `PENDING` with a single click and confirmation dialog.
+
+**Live Activity Feed** — a real-time scrolling feed of all broker events received via `/ws/monitor`. Shows event type, queue name, detail, and timestamp. Capped at 50 events with auto-scroll. Connection status indicator with automatic reconnect.
+
+### Management
+
+**Topics** — create topics and browse all existing ones.
+
+**Queues** — create queues bound to topics. Click any queue to inspect its messages inline.
+
+**Publish** — publish messages to any topic with JSON validation, payload templates, and real-time fan-out confirmation.
 
 ---
 
@@ -176,27 +191,42 @@ PostgreSQL's `GROUP BY` with `COUNT()` computes aggregations in a single scan wi
 
 ## API Reference
 
-### REST Endpoints
+### Broker Endpoints
 
 #### Create a Topic
 ```
-POST /api/v1/topics
+POST /topics/createTopic
 Content-Type: application/json
 
 { "name": "order.placed" }
 ```
 
+#### List All Topics
+```
+GET /topics/all
+```
+
 #### Create a Queue
 ```
-POST /api/v1/queues
+POST /queues/createQueue
 Content-Type: application/json
 
 { "name": "email-queue", "topic_name": "order.placed" }
 ```
 
+#### List All Queues
+```
+GET /queues/all
+```
+
+#### Get Messages by Queue
+```
+GET /queues/{queueName}/messages
+```
+
 #### Publish a Message
 ```
-POST /api/v1/messages/publish
+POST /messages/publishMessage
 Content-Type: application/json
 
 { "topic_name": "order.placed", "payload": "{\"orderId\": \"123\"}" }
@@ -204,12 +234,12 @@ Content-Type: application/json
 
 #### Consume a Message (Pull)
 ```
-GET /api/v1/consumer/consume?queue_name=email-queue&consumer_id=email-service
+GET /consumer/consumeMessage?queue_name=email-queue&consumer_id=email-service
 ```
 
 #### Acknowledge a Message
 ```
-POST /api/v1/consumer/ack
+POST /consumer/ackMessage
 Content-Type: application/json
 
 { "message_id": "<uuid>", "consumer_id": "email-service" }
@@ -217,7 +247,7 @@ Content-Type: application/json
 
 #### Nack a Message
 ```
-POST /api/v1/consumer/nack
+POST /consumer/nackMessage
 Content-Type: application/json
 
 { "message_id": "<uuid>", "consumer_id": "email-service", "requeue": true }
@@ -229,29 +259,29 @@ Set `requeue: true` to reset to `PENDING`. Set `requeue: false` to move directly
 
 #### Broker Overview
 ```
-GET /api/v1/dashboard/overview
+GET /dashboard/overview
 ```
 
 #### Queue Breakdown
 ```
-GET /api/v1/dashboard/queues
+GET /dashboard/queues
 ```
 
 #### Dead Letter Queue
 ```
-GET /api/v1/dashboard/dlq
+GET /dashboard/dlq
 ```
 
 #### Replay a Dead Message
 ```
-POST /api/v1/dashboard/dlq/{messageId}/replay
+POST /dashboard/dlq/{messageId}/replay
 ```
 
 ### WebSocket
 
 #### Consumer Notifications (Push-based consumption)
 ```
-ws://localhost:8080/ws/consume?queue=email-queue
+ws://<host>/ws/consume?queue=email-queue
 ```
 
 Notification format:
@@ -259,11 +289,11 @@ Notification format:
 { "queue": "email-queue", "event": "<payload preview...>" }
 ```
 
-On receiving a notification, call `GET /consume` via REST to claim and process the message.
+On receiving a notification, call `GET /consumer/consumeMessage` via REST to claim and process the message.
 
 #### Monitor Feed (Dashboard)
 ```
-ws://localhost:8080/ws/monitor
+ws://<host>/ws/monitor
 ```
 
 Event format:
@@ -305,72 +335,78 @@ All errors return a consistent shape:
 - PostgreSQL 16
 - Maven
 - Node.js 20+
+- Docker + Docker Compose (optional — for full stack)
 
-### Backend Setup
+### Option A — Docker Compose (recommended)
 
-**1. Clone the repository**
 ```bash
 git clone https://github.com/srivathsav01/MiniQueue.git
 cd MiniQueue
 ```
 
-**2. Create the database**
+Create a `.env` file in the project root:
+```
+POSTGRES_PASSWORD=your_password
+SPRING_DATASOURCE_PASSWORD=your_password
+CORS_ALLOWED_ORIGINS=http://localhost:80
+```
 
-Open psql or pgAdmin and run:
+Start everything:
+```bash
+docker compose up --build
+```
+
+| Service | URL |
+|---|---|
+| Dashboard | http://localhost |
+| Swagger UI | http://localhost/swagger-ui/index.html |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 |
+
+### Option B — Manual Setup
+
+**Backend:**
+
+```bash
+cd miniqueue-backend
+```
+
+Create the database:
 ```sql
 CREATE DATABASE miniqueue;
 ```
 
-**3. Configure the application**
+Configure `src/main/resources/application.yml` with your database credentials, then:
 
-Edit `src/main/resources/application.yml`:
-```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/miniqueue
-    username: your_postgres_username
-    password: your_postgres_password
-```
-
-**4. Run the backend**
 ```bash
 ./mvnw spring-boot:run
 ```
 
-The broker starts on `http://localhost:8080`.
+Backend starts on `http://localhost:8080`.
 
-**5. Verify**
+**Frontend:**
 
-Open the Swagger UI in your browser:
-```
-http://localhost:8080/swagger-ui/index.html
-```
-
-All REST endpoints are documented and executable directly from the browser.
-
-### Dashboard Setup
-
-**1. Navigate to the dashboard directory**
 ```bash
 cd miniqueue-dashboard
-```
-
-**2. Install dependencies**
-```bash
 npm install
-```
-
-**3. Start the development server**
-```bash
 npm run dev
 ```
 
-The dashboard opens at `http://localhost:5173`.
-
-To test the monitor WebSocket independently, use Postman's WebSocket client and connect to `ws://localhost:8080/ws/monitor`.
+Dashboard opens at `http://localhost:5173`.
 
 ---
 
-## Roadmap
+## Observability
 
-- **Phase 5** — Docker Compose, Prometheus metrics, Grafana dashboards, CI/CD pipeline, deployment
+When running via Docker Compose, Prometheus scrapes the broker's custom metrics every 15 seconds:
+
+| Metric | Type | Description |
+|---|---|---|
+| `miniqueue_messages_published_total` | Counter | Total messages published |
+| `miniqueue_messages_consumed_total` | Counter | Total messages consumed |
+| `miniqueue_messages_acked_total` | Counter | Total messages acknowledged |
+| `miniqueue_messages_dead_total` | Counter | Total messages dead-lettered |
+| `miniqueue_messages_redelivered_total` | Counter | Total messages redelivered |
+| `miniqueue_queue_depth{queue="..."}` | Gauge | Current pending messages per queue |
+
+Grafana at `http://localhost:3000` (admin/admin) connects to Prometheus automatically.
