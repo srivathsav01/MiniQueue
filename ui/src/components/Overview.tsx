@@ -81,9 +81,9 @@ function MetricCard({
 }) {
   return (
     <Card className={`${bg} border ${border} shadow-none`}>
-      <CardHeader className="pb-1 pt-4 px-5">
+      <CardHeader className="pb-1 pt-4 px-3 md:px-5">
         <CardTitle className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
+          <span className={`hidden md:inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
           {label}
         </CardTitle>
       </CardHeader>

@@ -1,6 +1,7 @@
 package com.sri.miniqueue.controller;
 
 import com.sri.miniqueue.dto.CreateQueueRequest;
+import com.sri.miniqueue.dto.MessageResponse;
 import com.sri.miniqueue.dto.QueueResponse;
 import com.sri.miniqueue.dto.Response;
 import com.sri.miniqueue.entity.Queue;
@@ -11,10 +12,9 @@ import com.sri.miniqueue.service.MessageService;
 import com.sri.miniqueue.utils.APIConstants;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RequiredArgsConstructor
 @RestController
@@ -29,6 +29,16 @@ public class QueueController {
     @PostMapping(APIConstants.CREATE_QUEUE)
     public Response<QueueResponse> createQueue(@RequestBody CreateQueueRequest createQueueRequest) throws CustomException{
         return ResponseBuilder.createSuccessData(queueMapper.toResponse(messageService.createQueue(createQueueRequest.getName(),createQueueRequest.getTopicName())));
+    }
+
+    @GetMapping(APIConstants.ALL)
+    public Response<List<QueueResponse>> getAllQueues() throws CustomException {
+        return ResponseBuilder.createSuccessData(messageService.getAllQueues());
+    }
+
+    @GetMapping("/{queueName}"+APIConstants.MESSAGE)
+    public Response<List<MessageResponse>> getMessagesByQueue(@PathVariable String queueName) throws CustomException{
+        return ResponseBuilder.createSuccessData(messageService.getMessagesByQueue(queueName));
     }
 
 }

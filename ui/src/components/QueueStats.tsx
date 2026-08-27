@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import type { QueueStats } from "@/types/dashboard";
 import { getQueueStats } from "@/api/dashboard";
 import { useRefresh } from "@/context/RefreshContext";
+import QueueMessagePanel from "@/page/Queuemessagepanel";
 
 function StatusCell({
   value,
@@ -60,7 +61,7 @@ export default function QueueStats() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
-  const refreshKey = useRefresh();
+  const {refreshKey} = useRefresh();
 
   useEffect(() => {
     setLoading(true);
@@ -165,11 +166,21 @@ export default function QueueStats() {
       </div>
 
       {selectedQueue && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          <span className="font-mono text-foreground">{selectedQueue}</span>{" "}
-          selected — queue filtering coming in a future update.
-        </p>
-      )}
+  <div className="mt-4">
+    <div className="flex items-center justify-between mb-3">
+      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+        Messages in <span className="font-mono text-foreground">{selectedQueue}</span>
+      </p>
+      <button
+        onClick={() => setSelectedQueue(null)}
+        className="text-xs text-red-600 hover:text-foreground transition-colors"
+      >
+        Close
+      </button>
+    </div>
+    <QueueMessagePanel queueName={selectedQueue} />
+  </div>
+)}
     </section>
   );
 }

@@ -1,6 +1,9 @@
 package com.sri.miniqueue.serviceImpl;
 
 import com.sri.miniqueue.dto.ConsumeResponse;
+import com.sri.miniqueue.dto.MessageResponse;
+import com.sri.miniqueue.dto.QueueResponse;
+import com.sri.miniqueue.dto.TopicResponse;
 import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
 import com.sri.miniqueue.entity.Topic;
@@ -8,6 +11,9 @@ import com.sri.miniqueue.event.BrokerActivityEvent;
 import com.sri.miniqueue.event.BrokerEventType;
 import com.sri.miniqueue.event.NewMessageEvent;
 import com.sri.miniqueue.exception.CustomException;
+import com.sri.miniqueue.mapper.MessageMapper;
+import com.sri.miniqueue.mapper.QueueMapper;
+import com.sri.miniqueue.mapper.TopicMapper;
 import com.sri.miniqueue.metrics.BrokerMetrics;
 import com.sri.miniqueue.repository.MessageRepository;
 import com.sri.miniqueue.repository.QueueRepository;
@@ -24,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RequiredArgsConstructor
 @Service
@@ -39,6 +46,12 @@ public class MessageServiceImpl implements MessageService {
 
     private final BrokerMetrics brokerMetrics;
 
+    private final TopicMapper topicMapper;
+
+    private final QueueMapper queueMapper;
+
+    private final MessageMapper messageMapper;
+
     @Override
     public Topic createTopic(String name) throws CustomException {
         if(this.topicRepository.findTopicByName(name.toLowerCase()).isPresent()){
@@ -48,6 +61,12 @@ public class MessageServiceImpl implements MessageService {
         topic.setName(name.toLowerCase());
         eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED,"","New Topic "+name+" created",LocalDateTime.now()));
         return this.topicRepository.save(topic);
+    }
+
+    @Override
+    public List<TopicResponse> getAllTopics() throws CustomException {
+        List<Topic> topics = this.topicRepository.findAll();
+       return topics.stream().map(topicMapper::toResponse).collect(Collectors.toList());
     }
 
     @Override
@@ -66,6 +85,12 @@ public class MessageServiceImpl implements MessageService {
         brokerMetrics.registerQueueDepthGauge(name.toLowerCase(),messageRepository);
         eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED,name,"New Queue "+name+" created for topic "+topicName,LocalDateTime.now()));
         return this.queueRepository.save(queue);
+    }
+
+    @Override
+    public List<QueueResponse> getAllQueues() throws CustomException {
+        List<Queue> queues = this.queueRepository.findAll();
+        return queues.stream().map(queueMapper::toResponse).collect(Collectors.toList());
     }
 
     @Override
@@ -172,6 +197,12 @@ public class MessageServiceImpl implements MessageService {
             brokerMetrics.incrementDead();
             return "Message set to Dead";
         }
+    }
+
+    @Override
+    public List<MessageResponse> getMessagesByQueue(String queueName) throws CustomException {
+        List<Message> messages = messageRepository.findByQueueName(queueName);
+        return messages.stream().map(messageMapper::toResponse).collect(Collectors.toList());
     }
 
     public String replayMessage(UUID messageId) {

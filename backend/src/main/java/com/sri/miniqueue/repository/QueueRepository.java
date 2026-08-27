@@ -1,8 +1,12 @@
 package com.sri.miniqueue.repository;
 
+import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
 import com.sri.miniqueue.entity.Topic;
+import com.sri.miniqueue.to.MessageStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -15,4 +19,5 @@ public interface QueueRepository extends JpaRepository<Queue, UUID> {
     List<Queue> findByTopic(Topic topic);
 
     Optional<Queue> findByName(String name);
+
 }

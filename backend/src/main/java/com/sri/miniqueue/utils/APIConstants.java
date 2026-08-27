@@ -7,6 +7,7 @@ public interface APIConstants {
 
     String TOPIC="/topics";
     String CREATE_TOPIC="/createTopic";
+    String ALL = "/all";
 
     String QUEUE="/queues";
     String CREATE_QUEUE="/createQueue";

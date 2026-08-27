@@ -32,4 +32,8 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
 
     @Query("SELECT COUNT(m) FROM Message m WHERE m.queue.name = :queueName AND m.status = :status")
     Long countByQueueNameAndStatus(@Param("queueName") String queueName, @Param("status") MessageStatus status);
+
+    @Query("SELECT m FROM Message m WHERE m.queue.name = :queueName ORDER BY m.publishedAt ASC")
+    List<Message> findByQueueName(@Param("queueName") String queueName);
+
 }

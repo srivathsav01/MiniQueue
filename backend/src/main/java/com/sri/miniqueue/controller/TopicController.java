@@ -12,10 +12,9 @@ import com.sri.miniqueue.utils.APIConstants;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -30,5 +29,10 @@ public class TopicController {
     @PostMapping(APIConstants.CREATE_TOPIC)
     public Response<TopicResponse> createTopic(@RequestBody CreateTopicRequest createTopicRequest) throws CustomException {
         return ResponseBuilder.createSuccessData(topicMapper.toResponse(messageService.createTopic(createTopicRequest.getName())));
+    }
+
+    @GetMapping(APIConstants.ALL)
+    public Response<List<TopicResponse>> getAllTopics() throws CustomException {
+        return ResponseBuilder.createSuccessData(messageService.getAllTopics());
     }
 }

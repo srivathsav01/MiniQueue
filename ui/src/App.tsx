@@ -7,6 +7,7 @@ import AppLayout from './page/AppLayout'
 import OverviewPage from './page/OverviewPage'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { MonitorWebSocketProvider } from './context/MonitorWebSocketContext'
+import ManagePage from './page/ManagePage'
 
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
         { path: '/', element: <OverviewPage /> },
         { path: '/home', element: <OverviewPage /> },
         { path: '/live', element: <LiveActivity /> },
+        { path: '/manage', element: <ManagePage /> },
       ]
     }
   ]);

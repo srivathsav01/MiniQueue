@@ -39,3 +39,24 @@ export interface BrokerEvent {
   detail: string;
   timestamp: string;
 }
+
+export interface Topic {
+    id: string;
+    name: string;
+}
+
+export interface Queue {
+    id: string;
+    name: string;
+    topicName: string;
+}
+
+export interface QueueMessageResponse {
+  messageId: string;
+  payload: string;
+  status: string;
+  consumerId: string | null;
+  retryCount: number;
+  publishedAt: string;
+  unackedAt: string | null;
+}
