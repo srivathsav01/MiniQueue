@@ -25,6 +25,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import ErrorDisplay from "./ErrorPage";
 
 function SkeletonCards() {
     return (
@@ -167,9 +168,7 @@ export default function ManagePage() {
 
     if (error) {
         return (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 px-5 py-4 text-sm text-rose-700 dark:text-rose-400">
-                Failed to load topics — {error}
-            </div>
+            <ErrorDisplay message={`Failed to load topics — ${error}`} onRetry={fetchTopics} variant="network" compact />
         );
     }
 

@@ -8,6 +8,7 @@ import OverviewPage from './page/OverviewPage'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { MonitorWebSocketProvider } from './context/MonitorWebSocketContext'
 import ManagePage from './page/ManagePage'
+import ErrorDisplay from './page/ErrorPage'
 
 
 function App() {
@@ -19,7 +20,8 @@ function App() {
         { path: '/home', element: <OverviewPage /> },
         { path: '/live', element: <LiveActivity /> },
         { path: '/manage', element: <ManagePage /> },
-      ]
+      ],
+      errorElement: <ErrorDisplay message={"404 Page Not Found"} variant="notFound" />
     }
   ]);
   return (

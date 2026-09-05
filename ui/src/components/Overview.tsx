@@ -4,6 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { DashboardOverview } from "../types/dashboard";
 import { getOverview } from "@/api/dashboard";
 import { useRefresh } from "@/context/RefreshContext";
+import ErrorDisplay from "@/page/ErrorPage";
 
 const statCards = (data: DashboardOverview) => [
   {
@@ -114,20 +115,22 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const refreshKey = useRefresh();
-  
-  useEffect(() => {
+
+  const fetchOverview = () => {
     setLoading(true);
     getOverview()
       .then(setData)
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [refreshKey]);
+  };
 
+  useEffect(() => {
+    fetchOverview();
+  }, [refreshKey]);
+  
   if (error) {
     return (
-      <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 px-5 py-4 text-sm text-rose-700 dark:text-rose-400">
-        Failed to load overview — {error}
-      </div>
+      <ErrorDisplay message={`Failed to load overview — ${error}`} onRetry={fetchOverview} variant="network" compact />
     );
   }
 

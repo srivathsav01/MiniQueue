@@ -15,6 +15,7 @@ import { Repeat2 } from 'lucide-react';
 import { toast } from "sonner";
 import { useConfirmDialog } from "@/context/ConfirmDialogContext";
 import { useRefresh } from "@/context/RefreshContext";
+import ErrorDisplay from "@/page/ErrorPage";
 
 function StatusCell({
     value,
@@ -64,7 +65,7 @@ export default function DeadLetterQueueStats() {
     const [error, setError] = useState<string | null>(null);
     const [replayingId, setReplayingId] = useState<string | null>(null);
     const { openConfirmDialog } = useConfirmDialog();
-    const { triggerRefresh } = useRefresh();
+    const { refreshKey, triggerRefresh } = useRefresh();
     const replayMessage = async (messageId: string) => {
         setReplayingId(messageId);
         try {
@@ -83,19 +84,22 @@ export default function DeadLetterQueueStats() {
         }
     }
 
-    useEffect(() => {
+    const fetchDlqMessages = () => {
         setLoading(true);
         getDlqMessages()
             .then(setData)
             .catch((err: Error) => setError(err.message))
             .finally(() => setLoading(false));
-    }, []);
+    }
+
+    useEffect(() => {
+        fetchDlqMessages();
+    }, [refreshKey]);
+
 
     if (error) {
         return (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-800 px-5 py-4 text-sm text-rose-700 dark:text-rose-400">
-                Failed to load deleted messages — {error}
-            </div>
+            <ErrorDisplay message={`Failed to load deleted messages — ${error}`} onRetry={fetchDlqMessages} variant="network" compact />
         );
     }
 
