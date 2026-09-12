@@ -184,8 +184,10 @@ PostgreSQL's `GROUP BY` with `COUNT()` computes aggregations in a single scan wi
 
 - **No consumer authentication** — any client can consume from any queue by providing a consumer ID string. A production broker would require consumer registration and credential verification.
 - **Single node only** — no horizontal scaling or clustering support. The WebSocket session registry is in-memory, so multiple broker instances would not share session state.
+- **No partitioned consumer groups** — multiple consumers on the same queue cannot split work by partition, so scaling reads across consumers requires additional coordination logic to avoid duplicate processing.
 - **No message TTL** — messages do not expire. A queue can grow unboundedly.
 - **No backpressure** — the broker does not limit how many messages a producer can publish.
+- **Unbenchmarked at scale** — PostgreSQL was chosen for correctness (transactions, durability) over a purpose-built queue like Redis Streams, but the design hasn't been stress-tested to identify where write throughput or lock contention start to become a bottleneck.
 
 ---
 
