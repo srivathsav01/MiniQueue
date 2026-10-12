@@ -11,6 +11,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -31,9 +33,13 @@ public class RedeliveryScheduler {
     @Value("${miniqueue.redelivery.max-retries}")
     private int retryCount;
 
+    @Value("${miniqueue.redelivery.batch-size}")
+    private int batchSize;
+
     @Scheduled(fixedDelayString = "${miniqueue.redelivery.fixed-delay-ms}")
+    @Transactional
     public void resetUnackedMessages(){
-        List<Message> messages = this.messageRepository.findStuckMessages(MessageStatus.UNACKED, LocalDateTime.now().minusMinutes(timeoutMinutes));
+        List<Message> messages = this.messageRepository.claimStuckMessages(MessageStatus.UNACKED.name(), LocalDateTime.now().minusMinutes(timeoutMinutes), batchSize);
         if(messages.isEmpty()){
             log.info("No stuck messages found");
             return;
@@ -56,7 +62,8 @@ public class RedeliveryScheduler {
             msg.setRetryCount(retries);
         });
         log.info("Redelivering {} stuck messages", messages.size()- deadCount.get());
-        log.warn("Messages moved to dead-letter queue: {}", deadCount.get());
+        if(deadCount.get() > 0){
+        log.warn("Messages moved to dead-letter queue: {}", deadCount.get());}
         this.messageRepository.saveAll(messages);
     }
 }

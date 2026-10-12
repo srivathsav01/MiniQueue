@@ -10,6 +10,7 @@ miniqueue:
     timeout-minutes: 10
     fixed-delay-ms: 60000
     max-retries: 3
+    batch-size: 100
 
 spring:
   application:

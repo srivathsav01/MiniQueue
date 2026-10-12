@@ -24,6 +24,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -122,12 +123,13 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
+    @Transactional(rollbackFor = CustomException.class)
     public ConsumeResponse consumeMessage(String queueName, String consumerId) throws CustomException {
         Optional<Queue> queue = this.queueRepository.findByName(queueName.toLowerCase());
         if(queue.isEmpty()){
             throw new CustomException("No Queue found with the name "+ queueName);
         }
-        Optional<Message> message = this.messageRepository.findOldestByQueueAndStatus(queue.get(),MessageStatus.PENDING);
+        Optional<Message> message = this.messageRepository.claimNextPending(queue.get().getId(),MessageStatus.PENDING.name());
         if(message.isEmpty()){
             throw new CustomException("No Messages found in the Queue "+queueName);
         }
@@ -147,15 +149,16 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
+    @Transactional(rollbackFor = CustomException.class)
     public String ackMessage(UUID messageId, String consumerId) throws CustomException{
-        Optional<Message> message = this.messageRepository.findById(messageId);
+        Optional<Message> message = this.messageRepository.findByIdForUpdate(messageId);
         if(message.isEmpty()){
             throw new CustomException("No message found with the id "+messageId);
         }
         if(message.get().getStatus()!=MessageStatus.UNACKED){
             throw new CustomException("The message "+messageId+" is not in unacked state");
         }
-        if(!message.get().getConsumerId().equals(consumerId)){
+        if(!consumerId.equals(message.get().getConsumerId())){
             throw new CustomException("Invalid Consumer ID "+consumerId);
         }
         Message msg = message.get();
@@ -167,15 +170,16 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
+    @Transactional(rollbackFor = CustomException.class)
     public String nackMessage(UUID messageId, String consumerId, boolean requeue) throws CustomException {
-        Optional<Message> message = this.messageRepository.findById(messageId);
+        Optional<Message> message = this.messageRepository.findByIdForUpdate(messageId);
         if(message.isEmpty()){
             throw new CustomException("No message found with the id "+messageId);
         }
         if(message.get().getStatus()!=MessageStatus.UNACKED){
             throw new CustomException("The message "+messageId+" is not in unacked state");
         }
-        if(!message.get().getConsumerId().equals(consumerId)){
+        if(!consumerId.equals(message.get().getConsumerId())){
             throw new CustomException("Invalid Consumer ID "+consumerId);
         }
         Message msg = message.get();
@@ -205,8 +209,10 @@ public class MessageServiceImpl implements MessageService {
         return messages.stream().map(messageMapper::toResponse).collect(Collectors.toList());
     }
 
+    @Override
+    @Transactional(rollbackFor = CustomException.class)
     public String replayMessage(UUID messageId) {
-        Optional<Message> msg = messageRepository.findById(messageId);
+        Optional<Message> msg = messageRepository.findByIdForUpdate(messageId);
         if(msg.isEmpty()) {
             throw new CustomException("No message found with id " + messageId);
         }

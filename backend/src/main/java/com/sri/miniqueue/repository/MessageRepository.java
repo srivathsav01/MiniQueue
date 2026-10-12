@@ -4,7 +4,9 @@ import com.sri.miniqueue.dto.MessageStatusCount;
 import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
 import com.sri.miniqueue.to.MessageStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -17,8 +19,11 @@ import java.util.UUID;
 @Repository
 public interface MessageRepository extends JpaRepository<Message, UUID> {
 
-    @Query("SELECT m FROM Message m WHERE m.queue = :queue AND m.status = :status ORDER BY m.publishedAt ASC LIMIT 1")
-    Optional<Message> findOldestByQueueAndStatus(@Param("queue") Queue queue, @Param("status") MessageStatus status);
+    @Query(value = "SELECT m.* FROM message m WHERE m.queue_id = :queue_id AND m.status = :status ORDER BY m.published_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED",nativeQuery = true )
+    Optional<Message> claimNextPending(@Param("queue_id") UUID queue_id, @Param("status") String status);
+
+    @Query(value = "SELECT m.* FROM message m WHERE m.status = :status AND m.unacked_at < :cutoff ORDER BY m.unacked_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED",nativeQuery = true)
+    List<Message> claimStuckMessages(@Param("status") String status, @Param("cutoff")LocalDateTime cutoff, @Param("limit") int limit);
 
     @Query("SELECT m FROM Message m WHERE m.status = :status AND m.unackedAt < :cutoff")
     List<Message> findStuckMessages(@Param("status") MessageStatus status, @Param("cutoff")LocalDateTime cutoff);
@@ -36,4 +41,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     @Query("SELECT m FROM Message m WHERE m.queue.name = :queueName ORDER BY m.publishedAt ASC")
     List<Message> findByQueueName(@Param("queueName") String queueName);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT m FROM Message m WHERE m.id = :id")
+    Optional<Message> findByIdForUpdate(@Param("id") UUID id);
 }

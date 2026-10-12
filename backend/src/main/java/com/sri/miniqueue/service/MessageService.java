@@ -34,4 +34,6 @@ public interface MessageService {
     String nackMessage(UUID messageId, String consumerId, boolean requeue) throws CustomException;
 
     List<MessageResponse> getMessagesByQueue(String queueName) throws CustomException;
+
+    String replayMessage(UUID messageId);
 }
