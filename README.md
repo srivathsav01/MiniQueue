@@ -228,6 +228,7 @@ Removing `SKIP LOCKED` from the consume query makes this test fail with duplicat
 - **No consumer authentication** — any client can consume from any queue by providing a consumer ID string. A production broker would require consumer registration and credential verification.
 - **WebSocket notifications are per instance** — message delivery state lives in PostgreSQL and is safe across multiple broker instances, but the WebSocket session registry is in-memory, so a push notification only reaches consumers connected to the instance that received the publish. Polling consumers are unaffected.
 - **No strict ordering or partitioning** — competing consumers on the same queue are safe (no duplicate delivery), but there is no per-key ordering like Kafka partitions, and delivery order across consumers is approximately FIFO.
+- **No partitioned consumer groups** — multiple consumers on the same queue cannot split work by partition, so scaling reads across consumers requires additional coordination logic to avoid duplicate processing.
 - **No message TTL** — messages do not expire. A queue can grow unboundedly.
 - **No backpressure** — the broker does not limit how many messages a producer can publish.
 - **Unbenchmarked at scale** — PostgreSQL was chosen for correctness (transactions, durability) over a purpose-built queue like Redis Streams, but the design hasn't been stress-tested to identify where write throughput or lock contention start to become a bottleneck.
