@@ -45,11 +45,15 @@ Producer
 
 ```
 PENDING ──── consumed ────▶ UNACKED ──── acked ────▶ ACKED
-                                │
-                                └─── retries exceeded ───▶ DEAD
+   ▲                            │
+   │                            ├── nack (requeue) or ack timeout ──▶ back to PENDING
+   │                            │
+   │                            └── nack (no requeue) or retries exceeded ──▶ DEAD
+   │                                                                          │
+   └──────────────────────────── replayed from DLQ ───────────────────────────┘
 ```
 
-A message can only move forward through states. An `ACKED` message can never go back to `PENDING`. State transitions are enforced in the service layer.
+An `ACKED` message is final and can never go back to `PENDING`. State transitions are enforced in the service layer, and every transition locks the message row first (see [Concurrency Guarantees](#concurrency-guarantees)).
 
 ### WebSocket Notification Flow
 
@@ -92,13 +96,14 @@ Dashboard renders event in real-time activity feed
 | Layer | Technology | Why |
 |---|---|---|
 | Backend | Spring Boot 3.5 | Production-grade Java framework |
-| Database | PostgreSQL 16 | Durable message storage with JSONB payload support |
+| Database | PostgreSQL 16 | Durable message storage and row-level locking (`FOR UPDATE SKIP LOCKED`) for safe concurrent delivery |
 | ORM | Spring Data JPA / Hibernate | Type-safe database access |
 | Language | Java 21 | LTS release, modern language features |
 | Frontend | React + TypeScript | Operations and management dashboard |
 | Styling | Tailwind CSS + Shadcn/ui | Component library and utility styling |
 | Observability | Prometheus + Grafana | Metrics collection and visualization |
 | Containerization | Docker + Docker Compose | Single-command stack deployment |
+| Testing | JUnit 5 + Testcontainers | Integration tests against a real PostgreSQL in Docker |
 
 ---
 
@@ -158,7 +163,7 @@ More importantly, this design duplicates the status transition logic. The `consu
 
 The chosen design keeps WebSocket as a **notification layer only**. The broker pushes a lightweight signal — "there is a message ready for you." The consumer responds by calling `GET /consume` via REST, which triggers the single, tested status transition path. The REST endpoint remains the sole source of truth for message state.
 
-This separation of concerns also handles the competing consumer case cleanly — if two consumers are connected to the same queue and both receive the notification, whoever calls `GET /consume` first claims the message. The second call naturally gets "no messages available." No coordination logic needed.
+This separation of concerns also handles the competing consumer case cleanly — if two consumers are connected to the same queue and both receive the notification, whoever calls `GET /consume` first claims the message. The second call gets "no messages available." No coordination logic is needed in the WebSocket layer, because the database row lock on the consume path guarantees only one caller can claim a message (see [Concurrency Guarantees](#concurrency-guarantees)).
 
 ### Why round-robin for WebSocket consumer selection
 
@@ -180,12 +185,52 @@ PostgreSQL's `GROUP BY` with `COUNT()` computes aggregations in a single scan wi
 
 ---
 
+## Concurrency Guarantees
+
+Miniqueue is safe to run with many competing consumers on the same queue, and with more than one broker instance pointed at the same database: **a message is never handed to two consumers at once, and an ack is never silently overwritten.** This is verified by an integration test, not just claimed.
+
+### The race
+
+The original consume path was *look, then act*: read the oldest `PENDING` message, then update it to `UNACKED` in a separate step. Two consumers polling at the same moment could both read the same row, and both would receive the message. The redelivery scheduler had the same shape, so it could overwrite a message that a consumer had just acked and put it back in the queue.
+
+Adding `@Transactional` does not fix this. A transaction makes changes all-or-nothing, but a plain `SELECT` takes no lock in PostgreSQL, so two transactions can still read the same row and both act on it.
+
+### The fix
+
+Every path that changes a message's state now locks the row before deciding anything:
+
+| Path | Lock | Why this lock |
+|---|---|---|
+| Consume | `SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1` | Each consumer locks a different row and skips rows other consumers hold, so N consumers work in parallel instead of queueing behind the same row |
+| Redelivery scheduler | `FOR UPDATE SKIP LOCKED`, in batches | Two broker instances never redeliver the same stuck message, and a message that is mid-ack is skipped rather than overwritten |
+| Ack / Nack / Replay | `FOR UPDATE` (pessimistic write) | These target one specific message, so they *wait* for the lock and then check the real, current status |
+
+The row lock is held only for the short claim transaction (milliseconds), never while a consumer processes the message. After the claim, the message is protected by its state: `UNACKED` with a `consumerId` and an `unackedAt` timestamp acts as a lease. If it isn't acked before the timeout, the scheduler returns it to `PENDING`. A late ack from the original consumer is then rejected by the `consumerId` check, a simple fencing check, because the message may already belong to another consumer.
+
+### The proof
+
+`ConcurrencyIntegrationTest` starts a real PostgreSQL 16 in Docker with Testcontainers, publishes 100 messages, releases 10 consumer threads at the same instant, and asserts that:
+
+- no message was delivered more than once,
+- every published message was delivered, and
+- the database shows 0 `PENDING` and 100 `UNACKED`.
+
+Removing `SKIP LOCKED` from the consume query makes this test fail with duplicate deliveries, which confirms the test actually detects the race rather than passing by luck.
+
+### The trade-off
+
+`SKIP LOCKED` gives approximately FIFO delivery, not strict FIFO. With several consumers, a later message can finish before an earlier one, which is the same behaviour as an SQS standard queue. Strict per-key ordering would need partitioning, which Miniqueue does not implement.
+
+---
+
 ## Known Limitations
 
 - **No consumer authentication** — any client can consume from any queue by providing a consumer ID string. A production broker would require consumer registration and credential verification.
-- **Single node only** — no horizontal scaling or clustering support. The WebSocket session registry is in-memory, so multiple broker instances would not share session state.
+- **WebSocket notifications are per instance** — message delivery state lives in PostgreSQL and is safe across multiple broker instances, but the WebSocket session registry is in-memory, so a push notification only reaches consumers connected to the instance that received the publish. Polling consumers are unaffected.
+- **No strict ordering or partitioning** — competing consumers on the same queue are safe (no duplicate delivery), but there is no per-key ordering like Kafka partitions, and delivery order across consumers is approximately FIFO.
 - **No message TTL** — messages do not expire. A queue can grow unboundedly.
 - **No backpressure** — the broker does not limit how many messages a producer can publish.
+- **Unbenchmarked at scale** — PostgreSQL was chosen for correctness (transactions, durability) over a purpose-built queue like Redis Streams, but the design hasn't been stress-tested to identify where write throughput or lock contention start to become a bottleneck.
 
 ---
 
@@ -368,7 +413,7 @@ docker compose up --build
 **Backend:**
 
 ```bash
-cd miniqueue-backend
+cd backend
 ```
 
 Create the database:
@@ -376,7 +421,7 @@ Create the database:
 CREATE DATABASE miniqueue;
 ```
 
-Configure `src/main/resources/application.yml` with your database credentials, then:
+Configure `src/main/resources/application.yaml` with your database credentials, then:
 
 ```bash
 ./mvnw spring-boot:run
@@ -387,12 +432,21 @@ Backend starts on `http://localhost:8080`.
 **Frontend:**
 
 ```bash
-cd miniqueue-dashboard
+cd ui
 npm install
 npm run dev
 ```
 
 Dashboard opens at `http://localhost:5173`.
+
+### Running the tests
+
+The integration tests start their own throwaway PostgreSQL container, so they don't touch your local database. Docker (or a Docker-compatible runtime such as Rancher Desktop in `dockerd` mode) must be running.
+
+```bash
+cd backend
+./mvnw test
+```
 
 ---
 
