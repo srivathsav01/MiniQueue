@@ -1,6 +1,7 @@
 package com.sri.miniqueue;
 
 import com.sri.miniqueue.exception.CustomException;
+import com.sri.miniqueue.exception.NoMessageAvailableException;
 import com.sri.miniqueue.repository.MessageRepository;
 import com.sri.miniqueue.service.MessageService;
 import com.sri.miniqueue.to.MessageStatus;
@@ -69,10 +70,7 @@ void concurrentConsumersNeverReceiveTheSameMessage() throws Exception {
                 try {
                     delivered.add(messageService.consumeMessage(queue, consumerId).getMessageId());
                     received++;
-                } catch (CustomException e) {
-                    if (!e.getMessage().startsWith("No Messages found")) {
-                        throw e;
-                    }
+                } catch (NoMessageAvailableException e) {
                     return received;
                 }
             }

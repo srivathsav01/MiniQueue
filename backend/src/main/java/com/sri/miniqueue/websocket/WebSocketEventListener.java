@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -21,8 +23,8 @@ public class WebSocketEventListener {
 
     private final ObjectMapper objectMapper;
 
-    @EventListener
-    private void listenNewMessage(NewMessageEvent event) {
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void listenNewMessage(NewMessageEvent event) {
         Optional< WebSocketSession> session = webSocketSessionRegistry.getNextSession(event.getQueueName());
         if(session.isPresent()){
             try{

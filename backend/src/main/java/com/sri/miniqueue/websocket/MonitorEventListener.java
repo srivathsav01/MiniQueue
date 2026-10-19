@@ -6,8 +6,9 @@ import com.sri.miniqueue.event.BrokerActivityEvent;
 import com.sri.miniqueue.event.NewMessageEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -25,8 +26,8 @@ public class MonitorEventListener {
 
     private final ObjectMapper objectMapper;
 
-    @EventListener
-    private void onBrokerActivity(BrokerActivityEvent event) {
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT,fallbackExecution = true)
+    public void onBrokerActivity(BrokerActivityEvent event) {
         List<WebSocketSession> sessions = monitorWebSocketHandler.getSessions();
         if(!sessions.isEmpty()){
             try {
