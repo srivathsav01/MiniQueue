@@ -18,7 +18,7 @@ public class Queue {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column
+    @Column(nullable = false,unique = true)
     private String name;
 
     @ManyToOne()

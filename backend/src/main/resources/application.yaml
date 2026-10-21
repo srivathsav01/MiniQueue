@@ -11,6 +11,8 @@ miniqueue:
     fixed-delay-ms: 60000
     max-retries: 3
     batch-size: 100
+  limits:
+    max-payload-bytes: 262144 #256 KB
 
 spring:
   application:

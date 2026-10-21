@@ -3,6 +3,7 @@ package com.sri.miniqueue.exception;
 import com.sri.miniqueue.dto.Response;
 import com.sri.miniqueue.mapper.ResponseBuilder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -55,6 +56,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<Response<String>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
         return error(HttpStatus.BAD_REQUEST, "Invalid value for parameter '" + ex.getName() + "'");
+    }
+
+    @ExceptionHandler(PayloadTooLargeException.class)
+    public ResponseEntity<Response<String>> handlePayloadTooLarge(PayloadTooLargeException ex) {
+        return error(HttpStatus.PAYLOAD_TOO_LARGE, ex.getMessage());
+    }
+
+    // Safety net: a constraint violation the service didn't translate itself is still the
+    // client's conflict, not a server bug. Log it so we notice and add a proper message.
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Response<String>> handleDataIntegrity(DataIntegrityViolationException ex) {
+        log.warn("Untranslated constraint violation", ex);
+        return error(HttpStatus.CONFLICT, "The request conflicts with existing data");
     }
 
     @ExceptionHandler(Exception.class)

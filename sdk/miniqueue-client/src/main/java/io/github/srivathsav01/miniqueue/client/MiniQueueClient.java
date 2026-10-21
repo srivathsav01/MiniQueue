@@ -211,6 +211,7 @@ public final class MiniQueueClient {
             case 400 -> new MiniQueueException.BadRequest(message);
             case 404 -> new MiniQueueException.NotFound(message);
             case 409 -> new MiniQueueException.Conflict(message);
+            case 413 -> new MiniQueueException.PayloadTooLarge(message);
             default -> status >= 500
                     ? new MiniQueueException.ServerError(message, status)
                     : new MiniQueueException(message, status, null);

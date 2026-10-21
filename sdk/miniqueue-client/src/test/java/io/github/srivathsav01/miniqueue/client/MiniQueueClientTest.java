@@ -197,4 +197,15 @@ class MiniQueueClientTest {
         assertThrows(IllegalArgumentException.class, () -> client.consume(" ", "email-service"));
         assertThrows(IllegalArgumentException.class, () -> MiniQueueClient.builder("localhost:8080"));
     }
+
+    @Test
+    void oversizedPayloadIsNotRetryable() {
+        replyStatus = 413;
+        replyBody = "{\"status\":413,\"message\":\"Payload is 300000 bytes; the limit is 262144\"}";
+
+        MiniQueueException.PayloadTooLarge e = assertThrows(MiniQueueException.PayloadTooLarge.class,
+                () -> client.publish("order.placed", "{}"));
+
+        assertFalse(e.isRetryable());
+    }
 }

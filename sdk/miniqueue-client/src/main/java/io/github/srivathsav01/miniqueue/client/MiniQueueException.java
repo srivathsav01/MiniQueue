@@ -64,6 +64,13 @@ public class MiniQueueException extends RuntimeException {
         }
     }
 
+    /** HTTP 413: the payload is over the broker's size limit. Send a smaller message; retrying will not help. */
+    public static final class PayloadTooLarge extends MiniQueueException {
+        PayloadTooLarge(String message) {
+            super(message, 413, null);
+        }
+    }
+
     /** HTTP 5xx: the broker failed. Retrying later, with backoff, may succeed. */
     public static final class ServerError extends MiniQueueException {
         ServerError(String message, int statusCode) {

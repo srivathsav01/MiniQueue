@@ -10,10 +10,7 @@ import com.sri.miniqueue.entity.Topic;
 import com.sri.miniqueue.event.BrokerActivityEvent;
 import com.sri.miniqueue.event.BrokerEventType;
 import com.sri.miniqueue.event.NewMessageEvent;
-import com.sri.miniqueue.exception.ConflictException;
-import com.sri.miniqueue.exception.CustomException;
-import com.sri.miniqueue.exception.NoMessageAvailableException;
-import com.sri.miniqueue.exception.ResourceNotFoundException;
+import com.sri.miniqueue.exception.*;
 import com.sri.miniqueue.mapper.MessageMapper;
 import com.sri.miniqueue.mapper.QueueMapper;
 import com.sri.miniqueue.mapper.TopicMapper;
@@ -23,13 +20,16 @@ import com.sri.miniqueue.repository.QueueRepository;
 import com.sri.miniqueue.repository.TopicRepository;
 import com.sri.miniqueue.service.MessageService;
 import com.sri.miniqueue.to.MessageStatus;
+import com.sri.miniqueue.utils.Names;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -60,15 +60,24 @@ public class MessageServiceImpl implements MessageService {
     @Value("${miniqueue.redelivery.max-retries}")
     private int maxRetries;
 
+    @Value("${miniqueue.limits.max-payload-bytes:262144}")
+    private int maxPayloadBytes;
+
     @Override
-    public Topic createTopic(String name) throws CustomException {
-        if(this.topicRepository.findTopicByName(name.toLowerCase()).isPresent()){
-            throw new ConflictException("Topic already exists with the name "+name);
-        }
+    @Transactional
+    public Topic createTopic(String rawName) {
+        String name = Names.normalize(rawName, "Topic");
         Topic topic = new Topic();
-        topic.setName(name.toLowerCase());
-        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED,"","New Topic "+name+" created",LocalDateTime.now()));
-        return this.topicRepository.save(topic);
+        topic.setName(name);
+        try {
+            // saveAndFlush, not save: the INSERT runs now, so a duplicate fails inside this
+            // try block instead of later at commit, where we could no longer catch it.
+            topic = topicRepository.saveAndFlush(topic);
+        } catch (DataIntegrityViolationException e) {
+            throw new ConflictException("Topic already exists with the name " + name);
+        }
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED, "", "New Topic " + name + " created", LocalDateTime.now()));
+        return topic;
     }
 
     @Override
@@ -78,21 +87,22 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
-    public Queue createQueue(String name, String topicName) throws CustomException {
-        Optional<Topic> topic = this.topicRepository.findTopicByName(topicName.toLowerCase());
-        if(topic.isEmpty()){
-            throw new ResourceNotFoundException("No Topic found with the name "+ topicName);
+    @Transactional
+    public Queue createQueue(String rawName, String rawTopicName) {
+        String name = Names.normalize(rawName, "Queue");
+        String topicName = Names.normalize(rawTopicName, "Topic");
+        Topic topic = topicRepository.findTopicByName(topicName)
+                .orElseThrow(() -> new ResourceNotFoundException("No Topic found with the name " + topicName));
+        Queue queue = Queue.builder().name(name).topic(topic).build();
+        try {
+            queue = queueRepository.saveAndFlush(queue);
+        } catch (DataIntegrityViolationException e) {
+            throw new ConflictException("Queue already exists with the name " + name);
         }
-        if(this.queueRepository.findByName(name.toLowerCase()).isPresent()){
-            throw new ConflictException("Queue already exists with the name "+ name);
-        }
-        Queue queue = Queue.builder()
-                .name(name.toLowerCase())
-                .topic(topic.get())
-                .build();
-        brokerMetrics.registerQueueDepthGauge(name.toLowerCase(),messageRepository);
-        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED,name,"New Queue "+name+" created for topic "+topicName,LocalDateTime.now()));
-        return this.queueRepository.save(queue);
+        // Only after the insert succeeded: before, a failed create still registered a gauge.
+        brokerMetrics.registerQueueDepthGauge(name, messageRepository);
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CREATED, name, "New Queue " + name + " created for topic " + topicName, LocalDateTime.now()));
+        return queue;
     }
 
     @Override
@@ -103,14 +113,23 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     @Transactional
-    public void publishMessage(String topicName, String payload) throws CustomException {
-        Optional<Topic> topic = this.topicRepository.findTopicByName(topicName.toLowerCase());
+    public void publishMessage(String rawTopicName, String payload) throws CustomException {
+        String topicName = Names.normalize(rawTopicName, "Topic");
+        if (payload == null) {
+            throw new CustomException("payload is required");
+        }
+        // Count bytes, not characters: "é" is 1 char but 2 bytes, and storage and network pay for bytes.
+        int size = payload.getBytes(StandardCharsets.UTF_8).length;
+        if (size > maxPayloadBytes) {
+            throw new PayloadTooLargeException("Payload is " + size + " bytes; the limit is " + maxPayloadBytes);
+        }
+        Optional<Topic> topic = this.topicRepository.findTopicByName(rawTopicName.toLowerCase());
         if(topic.isEmpty()){
-            throw new ResourceNotFoundException("No Topic found with the name "+ topicName);
+            throw new ResourceNotFoundException("No Topic found with the name "+ rawTopicName);
         }
         List<Queue> queueList = this.queueRepository.findByTopic(topic.get());
         if(queueList.isEmpty()){
-            throw new CustomException("No Queues are bound to the topic "+ topicName);
+            throw new CustomException("No Queues are bound to the topic "+ rawTopicName);
         }
         queueList.forEach(queue->{
             Message message = new Message();
