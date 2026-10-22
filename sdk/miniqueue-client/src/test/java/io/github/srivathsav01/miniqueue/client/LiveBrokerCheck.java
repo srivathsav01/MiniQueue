@@ -81,9 +81,9 @@ public class LiveBrokerCheck {
 
     private static void createTopicAndQueue(String baseUrl, String topic, String queue) throws Exception {
         HttpClient http = HttpClient.newHttpClient();
-        postJson(http, baseUrl + "/topics/createTopic",
+        postJson(http, baseUrl + "/api/v1/topics",
                 "{\"name\":\"" + topic + "\"}");
-        postJson(http, baseUrl + "/queues/createQueue",
+        postJson(http, baseUrl + "/api/v1/queues",
                 "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
     }
 

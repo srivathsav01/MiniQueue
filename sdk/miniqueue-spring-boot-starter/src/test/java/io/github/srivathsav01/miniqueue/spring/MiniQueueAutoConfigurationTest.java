@@ -13,7 +13,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -222,9 +221,19 @@ class MiniQueueAutoConfigurationTest {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.setExecutor(executor);
 
-            server.createContext("/consumer/consumeMessage", exchange -> {
+            // Paths carry the queue name or message id, so match on prefixes and suffixes.
+            server.createContext("/api/v1/queues/", exchange -> {
+                String path = exchange.getRequestURI().getPath();
+                if (!path.endsWith("/consume")) {
+                    exchange.sendResponseHeaders(404, -1);
+                    exchange.close();
+                    return;
+                }
                 consumeCalls.incrementAndGet();
-                recordQuery(exchange.getRequestURI().getRawQuery());
+                // "/api/v1/queues/{queue}/consume" -> {queue}
+                String[] parts = path.split("/");
+                queuesPolled.add(parts[parts.length - 2]);
+                consumerIdsPolled.add(bodyField(exchange, "consumer_id"));
                 String payload = pending.poll();
                 if (payload == null) {
                     exchange.sendResponseHeaders(204, -1);
@@ -239,12 +248,16 @@ class MiniQueueAutoConfigurationTest {
                                 "payload", payload,
                                 "published_at", "2026-10-19T10:00:00"))));
             });
-            server.createContext("/consumer/ackMessage", exchange -> {
-                acked.add(messageId(exchange));
-                reply(exchange, "{\"status\":200}");
-            });
-            server.createContext("/consumer/nackMessage", exchange -> {
-                nacked.add(messageId(exchange));
+            server.createContext("/api/v1/messages/", exchange -> {
+                String path = exchange.getRequestURI().getPath();
+                // "/api/v1/messages/{id}/ack" -> {id}
+                String[] parts = path.split("/");
+                UUID id = UUID.fromString(parts[parts.length - 2]);
+                if (path.endsWith("/ack")) {
+                    acked.add(id);
+                } else if (path.endsWith("/nack")) {
+                    nacked.add(id);
+                }
                 reply(exchange, "{\"status\":200}");
             });
             server.start();
@@ -258,21 +271,9 @@ class MiniQueueAutoConfigurationTest {
             pending.addAll(List.of(payloads));
         }
 
-        private void recordQuery(String rawQuery) {
-            for (String pair : rawQuery.split("&")) {
-                String[] kv = pair.split("=", 2);
-                String value = URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
-                if (kv[0].equals("queue_name")) {
-                    queuesPolled.add(value);
-                } else if (kv[0].equals("consumer_id")) {
-                    consumerIdsPolled.add(value);
-                }
-            }
-        }
-
-        private UUID messageId(HttpExchange exchange) throws IOException {
+        private String bodyField(HttpExchange exchange, String field) throws IOException {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            return UUID.fromString(json.readTree(body).get("message_id").asText());
+            return json.readTree(body).get(field).asText();
         }
 
         private static void reply(HttpExchange exchange, String body) throws IOException {

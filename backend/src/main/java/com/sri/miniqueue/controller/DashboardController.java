@@ -21,22 +21,26 @@ public class DashboardController {
 
     private final DashboardService dashboardService;
 
-    @GetMapping(APIConstants.OVERVIEW)
+    // GET /api/v1/dashboard/overview
+    @GetMapping("/overview")
     public Response<DashboardOverviewResponse> getOverview(){
         return ResponseBuilder.createSuccessData(dashboardService.getOverview());
     }
 
+    // GET /api/v1/dashboard/queues
     @GetMapping(APIConstants.QUEUES)
     public Response<List<QueueStatsResponse>> getQueueStats(){
         return ResponseBuilder.createSuccessData(dashboardService.getQueueStats());
     }
 
-    @GetMapping(APIConstants.DLQ)
+    // GET /api/v1/dashboard/dlq
+    @GetMapping("/dlq")
     public Response<List<DlqMessageResponse>> getDeadMessages(){
         return ResponseBuilder.createSuccessData(dashboardService.getDeadLetterMessages());
     }
 
-    @PostMapping(APIConstants.DLQ+"/{messageId}"+APIConstants.REPLAY)
+    // GET /api/v1/dashboard/dlq/{messageId}/replay
+    @PostMapping("/dlq/{messageId}/replay")
     public Response<String> replayMessage(@PathVariable UUID messageId){
         return ResponseBuilder.createSuccessData(dashboardService.replayMessage(messageId));
     }

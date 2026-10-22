@@ -12,7 +12,4 @@ public class ConsumeRequest {
 
     @JsonProperty("consumer_id")
     private String consumerId;
-
-    @JsonProperty("queue_name")
-    private String queueName;
 }

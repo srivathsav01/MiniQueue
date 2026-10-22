@@ -43,6 +43,9 @@ import java.util.UUID;
  */
 public final class MiniQueueClient {
 
+    /** Every broker endpoint lives under this version prefix. */
+    private static final String API = "/api/v1";
+
     static final String USER_AGENT = "miniqueue-java-client/0.1.0";
 
     private final String baseUrl;
@@ -77,9 +80,8 @@ public final class MiniQueueClient {
         Objects.requireNonNull(payload, "payload");
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("topic_name", topic);
         body.put("payload", payload);
-        send(post("/messages/publishMessage", body));
+        send(post(API + "/topics/" + pathSegment(topic) + "/messages", body));
     }
 
     /**
@@ -98,10 +100,9 @@ public final class MiniQueueClient {
         requireText(queue, "queue");
         requireText(consumerId, "consumerId");
 
-        String path = "/consumer/consumeMessage"
-                + "?queue_name=" + encode(queue)
-                + "&consumer_id=" + encode(consumerId);
-        HttpResponse<String> response = send(newRequest(path).GET().build());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("consumer_id", consumerId);
+        HttpResponse<String> response = send(post(API + "/queues/" + pathSegment(queue) + "/consume", body));
 
         if (response.statusCode() == 204) {
             return Optional.empty();
@@ -123,9 +124,8 @@ public final class MiniQueueClient {
         requireText(consumerId, "consumerId");
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("message_id", messageId.toString());
         body.put("consumer_id", consumerId);
-        send(post("/consumer/ackMessage", body));
+        send(post(API + "/messages/" + messageId + "/ack", body));
     }
 
     /**
@@ -142,10 +142,9 @@ public final class MiniQueueClient {
         requireText(consumerId, "consumerId");
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("message_id", messageId.toString());
         body.put("consumer_id", consumerId);
         body.put("requeue", requeue);
-        send(post("/consumer/nackMessage", body));
+        send(post(API + "/messages/" + messageId + "/nack", body));
     }
 
     // ---------------------------------------------------------------------------------
@@ -261,8 +260,14 @@ public final class MiniQueueClient {
         }
     }
 
-    private static String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    /**
+     * Encodes a topic or queue name for use as one URL path segment. URLEncoder is meant
+     * for query strings and turns a space into '+', which in a path is a literal plus,
+     * so spaces are re-encoded as %20. The broker rejects such names anyway; this only
+     * guarantees the request reaches it and gets a clean 400 instead of a wrong URL.
+     */
+    private static String pathSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     private static String requireText(String value, String name) {

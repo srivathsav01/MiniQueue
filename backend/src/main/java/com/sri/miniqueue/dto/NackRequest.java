@@ -13,8 +13,5 @@ public class NackRequest {
     @JsonProperty("consumer_id")
     private String consumerId;
 
-    @JsonProperty("message_id")
-    private UUID messageId;
-
     private Boolean requeue;
 }

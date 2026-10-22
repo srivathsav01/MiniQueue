@@ -38,7 +38,13 @@ final class StubBroker implements AutoCloseable {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(executor); // serve concurrent consumers in parallel, like the real broker
 
-        server.createContext("/consumer/consumeMessage", exchange -> {
+        // Paths carry the queue name or message id, so match on prefixes and suffixes.
+        server.createContext("/api/v1/queues/", exchange -> {
+            if (!exchange.getRequestURI().getPath().endsWith("/consume")) {
+                exchange.sendResponseHeaders(404, -1);
+                exchange.close();
+                return;
+            }
             consumeCalls.incrementAndGet();
             String payload = pending.poll();
             if (payload == null) {
@@ -56,13 +62,18 @@ final class StubBroker implements AutoCloseable {
                             "payload", payload,
                             "published_at", "2026-10-19T10:00:00"))));
         });
-        server.createContext("/consumer/ackMessage", exchange -> {
-            acked.add(messageIdFrom(exchange));
-            reply(exchange, "{\"status\":200,\"response_body\":\"Message acknowledged\"}");
-        });
-        server.createContext("/consumer/nackMessage", exchange -> {
-            nacked.add(messageIdFrom(exchange));
-            reply(exchange, "{\"status\":200,\"response_body\":\"Message reset to Pending\"}");
+        server.createContext("/api/v1/messages/", exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            if (path.endsWith("/ack")) {
+                acked.add(messageIdFrom(path));
+                reply(exchange, "{\"status\":200,\"response_body\":\"Message acknowledged\"}");
+            } else if (path.endsWith("/nack")) {
+                nacked.add(messageIdFrom(path));
+                reply(exchange, "{\"status\":200,\"response_body\":\"Message reset to Pending\"}");
+            } else {
+                exchange.sendResponseHeaders(404, -1);
+                exchange.close();
+            }
         });
         server.start();
     }
@@ -79,9 +90,10 @@ final class StubBroker implements AutoCloseable {
         return delivered.get(id);
     }
 
-    private UUID messageIdFrom(HttpExchange exchange) throws IOException {
-        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-        return UUID.fromString(json.readTree(body).get("message_id").asText());
+    /** "/api/v1/messages/{id}/ack" -> {id} */
+    private static UUID messageIdFrom(String path) {
+        String[] parts = path.split("/");
+        return UUID.fromString(parts[parts.length - 2]);
     }
 
     private static void reply(HttpExchange exchange, String body) throws IOException {

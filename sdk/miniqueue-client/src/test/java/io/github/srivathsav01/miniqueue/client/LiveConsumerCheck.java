@@ -87,8 +87,8 @@ public class LiveConsumerCheck {
 
     private static void createTopicAndQueue(String baseUrl, String topic, String queue) throws Exception {
         HttpClient http = HttpClient.newHttpClient();
-        post(http, baseUrl + "/topics/createTopic", "{\"name\":\"" + topic + "\"}");
-        post(http, baseUrl + "/queues/createQueue", "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
+        post(http, baseUrl + "/api/v1/topics", "{\"name\":\"" + topic + "\"}");
+        post(http, baseUrl + "/api/v1/queues", "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
     }
 
     private static void post(HttpClient http, String url, String body) throws Exception {

@@ -10,25 +10,7 @@ import com.sri.miniqueue.utils.APIConstants;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-@RestController
-@RequiredArgsConstructor
-@RequestMapping(APIConstants.CONSUMER)
+
 public class ConsumerController {
 
-    private final MessageService messageService;
-
-    @GetMapping(APIConstants.CONSUME_MESSAGE)
-    public Response<ConsumeResponse> consumeResponse(@RequestParam("queue_name") String queueName, @RequestParam("consumer_id") String consumerId){
-        return ResponseBuilder.createSuccessData(messageService.consumeMessage(queueName, consumerId));
-    }
-
-    @PostMapping(APIConstants.ACK_MESSAGE)
-    public Response<String> ackMessage(@RequestBody AckRequest ackRequest){
-        return ResponseBuilder.createSuccessData(messageService.ackMessage(ackRequest.getMessageId(),ackRequest.getConsumerId()));
-    }
-
-    @PostMapping(APIConstants.NACK_MESSAGE)
-    public Response<String> nackMessage(@RequestBody NackRequest nackRequest){
-        return ResponseBuilder.createSuccessData(messageService.nackMessage(nackRequest.getMessageId(),nackRequest.getConsumerId(),nackRequest.getRequeue()));
-    }
 }

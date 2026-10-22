@@ -8,8 +8,5 @@ import lombok.Setter;
 @Setter
 public class PublishMessageRequest {
 
-    @JsonProperty("topic_name")
-    private String topicName;
-
     private String payload;
 }

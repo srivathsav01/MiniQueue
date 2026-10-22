@@ -2,19 +2,19 @@ import type { ApiResponse, DashboardOverview, DlqMessage, QueueStats } from "../
 import apiClient from "./client";
 
 function getOverview(): Promise<DashboardOverview> {
-    return apiClient.get<ApiResponse<DashboardOverview>>("/dashboard/overview").then((response) => response.data.response_body);
+    return apiClient.get<ApiResponse<DashboardOverview>>("/api/v1/dashboard/overview").then((response) => response.data.response_body);
 }
 
 function getQueueStats(): Promise<QueueStats[]> {
-    return apiClient.get<ApiResponse<QueueStats[]>>("/dashboard/queues").then((response) => response.data.response_body);
+    return apiClient.get<ApiResponse<QueueStats[]>>("/api/v1/dashboard/queues").then((response) => response.data.response_body);
 }
 
 function getDlqMessages(): Promise<DlqMessage[]> {
-    return apiClient.get<ApiResponse<DlqMessage[]>>("/dashboard/dlq").then((response) => response.data.response_body);
+    return apiClient.get<ApiResponse<DlqMessage[]>>("/api/v1/dashboard/dlq").then((response) => response.data.response_body);
 }
 
 function replayDlqMessage(messageId: string): Promise<String> {
-    return apiClient.post<ApiResponse<String>>(`/dashboard/dlq/${messageId}/replay`).then((response) => response.data.response_body);
+    return apiClient.post<ApiResponse<String>>(`/api/v1/dashboard/dlq/${messageId}/replay`).then((response) => response.data.response_body);
 }
 
 export {

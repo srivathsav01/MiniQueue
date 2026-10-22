@@ -2,25 +2,10 @@ package com.sri.miniqueue.utils;
 
 public interface APIConstants {
 
-    String MESSAGE="/messages";
-    String PUBLISH_MESSAGE="/publishMessage";
-
-    String TOPIC="/topics";
-    String CREATE_TOPIC="/createTopic";
-    String ALL = "/all";
-
-    String QUEUE="/queues";
-    String CREATE_QUEUE="/createQueue";
-
-    String CONSUMER = "/consumer";
-    String CONSUME_MESSAGE="/consumeMessage";
-    String ACK_MESSAGE="/ackMessage";
-    String NACK_MESSAGE="/nackMessage";
-
-    String DASHBOARD = "/dashboard";
-    String OVERVIEW = "/overview";
+    String API_V1 = "/api/v1";
+    String TOPICS = "/topics";
     String QUEUES = "/queues";
-    String DLQ = "/dlq";
-    String REPLAY = "/replay";
+    String MESSAGES = "/messages";
+    String DASHBOARD = "/dashboard";
 
 }

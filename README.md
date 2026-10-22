@@ -20,7 +20,7 @@ This is the core guarantee that makes distributed systems reliable: **at-least-o
 ```
 Producer
    │
-   │  POST /messages/publishMessage
+   │  POST /api/v1/topics/{topic}/messages
    ▼
 ┌─────────────────────────────────────────┐
 │               Miniqueue Broker          │
@@ -35,10 +35,10 @@ Producer
          ▼                        ▼
    consumer-service-01     consumer-service-02
 
-   Option A — Pull (REST polling)        Option B — Push (WebSocket)
-   GET /consumer/consumeMessage          ws://<host>/ws/consume?queue=queue-01
-   POST /consumer/ackMessage             → receives notification → calls GET /consume
-                                         → calls POST /ack
+   Option A — Pull (REST polling)                 Option B — Push (WebSocket)
+   POST /api/v1/queues/{queue}/consume            ws://<host>/ws/consume?queue=queue-01
+   POST /api/v1/messages/{id}/ack                 → receives notification → calls POST .../consume
+                                                  → calls POST .../ack
 ```
 
 ### Message Lifecycle (State Machine)
@@ -68,7 +68,7 @@ WebSocketEventListener picks next session (round-robin)
         ↓
 Pushes notification: { "queue": "queue-01", "event": "<payload preview>" }
         ↓
-Consumer receives notification → calls GET /consume via REST
+Consumer receives notification → calls GET /consumer/consumeMessage via REST
         ↓
 Status transitions to UNACKED — claimed by consumer
         ↓
@@ -157,17 +157,17 @@ If the application generates the timestamp, clock skew between multiple app inst
 
 The alternative design — transitioning a message to `UNACKED` inside the WebSocket event listener on push — seems simpler at first. But it introduces a subtle reliability problem.
 
-If the broker marks a message `UNACKED` at push time, and the consumer crashes between receiving the notification and calling `GET /consume`, the message is stuck in `UNACKED` with no consumer actively holding it. The redelivery scheduler eventually rescues it, but the window of inconsistency is real.
+If the broker marks a message `UNACKED` at push time, and the consumer crashes between receiving the notification and calling `GET /consumer/consumeMessage`, the message is stuck in `UNACKED` with no consumer actively holding it. The redelivery scheduler eventually rescues it, but the window of inconsistency is real.
 
 More importantly, this design duplicates the status transition logic. The `consumeMessage` service method already handles `PENDING → UNACKED` correctly — it sets the status, records the `consumerId`, and stamps `unackedAt` atomically. Replicating that logic in the WebSocket listener creates two code paths that must stay in sync.
 
-The chosen design keeps WebSocket as a **notification layer only**. The broker pushes a lightweight signal — "there is a message ready for you." The consumer responds by calling `GET /consume` via REST, which triggers the single, tested status transition path. The REST endpoint remains the sole source of truth for message state.
+The chosen design keeps WebSocket as a **notification layer only**. The broker pushes a lightweight signal — "there is a message ready for you." The consumer responds by calling `GET /consumer/consumeMessage` via REST, which triggers the single, tested status transition path. The REST endpoint remains the sole source of truth for message state.
 
-This separation of concerns also handles the competing consumer case cleanly — if two consumers are connected to the same queue and both receive the notification, whoever calls `GET /consume` first claims the message. The second call gets "no messages available." No coordination logic is needed in the WebSocket layer, because the database row lock on the consume path guarantees only one caller can claim a message (see [Concurrency Guarantees](#concurrency-guarantees)).
+This separation of concerns also handles the competing consumer case cleanly — if two consumers are connected to the same queue and both receive the notification, whoever calls `GET /consumer/consumeMessage` first claims the message. The second call gets "no messages available." No coordination logic is needed in the WebSocket layer, because the database row lock on the consume path guarantees only one caller can claim a message (see [Concurrency Guarantees](#concurrency-guarantees)).
 
 ### Why round-robin for WebSocket consumer selection
 
-When multiple consumers are connected to the same queue via WebSocket, the broker must decide who receives each notification. Sending to all of them would cause duplicate processing — each consumer would call `GET /consume` and compete, but the notification itself is redundant for all but one.
+When multiple consumers are connected to the same queue via WebSocket, the broker must decide who receives each notification. Sending to all of them would cause duplicate processing — each consumer would call `GET /consumer/consumeMessage` and compete, but the notification itself is redundant for all but one.
 
 Round-robin distributes notifications evenly across connected consumers using a per-queue `AtomicInteger` counter. This is thread-safe, stateless, and requires no coordination between consumers.
 
@@ -238,89 +238,27 @@ Removing `SKIP LOCKED` from the consume query makes this test fail with duplicat
 
 ### Broker Endpoints
 
-#### Create a Topic
-```
-POST /topics/createTopic
-Content-Type: application/json
+All REST endpoints are versioned under `/api/v1`. URLs name resources and the HTTP method says what happens to them; actions that change a message's state (consume, ack, nack, replay) are `POST`, because a `GET` must be safe for browsers and proxies to repeat.
 
-{ "name": "order.placed" }
-```
+| Method | Path | Body | Purpose |
+|---|---|---|---|
+| `POST` | `/api/v1/topics` | `{ "name": "order.placed" }` | Create a topic |
+| `GET` | `/api/v1/topics` | | List topics |
+| `POST` | `/api/v1/queues` | `{ "name": "email-queue", "topic_name": "order.placed" }` | Create a queue bound to a topic |
+| `GET` | `/api/v1/queues` | | List queues |
+| `GET` | `/api/v1/queues/{queue}/messages` | | Messages in a queue |
+| `POST` | `/api/v1/topics/{topic}/messages` | `{ "payload": "{\"orderId\": \"123\"}" }` | Publish to every queue bound to the topic |
+| `POST` | `/api/v1/queues/{queue}/consume` | `{ "consumer_id": "email-service" }` | Claim the oldest pending message: 200 with it, or 204 if none |
+| `POST` | `/api/v1/messages/{id}/ack` | `{ "consumer_id": "email-service" }` | Mark processed |
+| `POST` | `/api/v1/messages/{id}/nack` | `{ "consumer_id": "email-service", "requeue": true }` | Reject: `requeue: true` (default) retries, `false` moves it to the DLQ |
+| `GET` | `/api/v1/dashboard/overview` | | Broker-wide counts by status |
+| `GET` | `/api/v1/dashboard/queues` | | Per-queue counts |
+| `GET` | `/api/v1/dashboard/dlq` | | Dead-lettered messages |
+| `POST` | `/api/v1/dashboard/dlq/{id}/replay` | | Move a dead message back to `PENDING` |
 
-#### List All Topics
-```
-GET /topics/all
-```
+Topic and queue names are lowercased and must be 1 to 100 characters from `a-z`, `0-9`, `.`, `_` and `-`. Payloads are limited to `miniqueue.limits.max-payload-bytes` (256 KB by default).
 
-#### Create a Queue
-```
-POST /queues/createQueue
-Content-Type: application/json
-
-{ "name": "email-queue", "topic_name": "order.placed" }
-```
-
-#### List All Queues
-```
-GET /queues/all
-```
-
-#### Get Messages by Queue
-```
-GET /queues/{queueName}/messages
-```
-
-#### Publish a Message
-```
-POST /messages/publishMessage
-Content-Type: application/json
-
-{ "topic_name": "order.placed", "payload": "{\"orderId\": \"123\"}" }
-```
-
-#### Consume a Message (Pull)
-```
-GET /consumer/consumeMessage?queue_name=email-queue&consumer_id=email-service
-```
-
-#### Acknowledge a Message
-```
-POST /consumer/ackMessage
-Content-Type: application/json
-
-{ "message_id": "<uuid>", "consumer_id": "email-service" }
-```
-
-#### Nack a Message
-```
-POST /consumer/nackMessage
-Content-Type: application/json
-
-{ "message_id": "<uuid>", "consumer_id": "email-service", "requeue": true }
-```
-
-Set `requeue: true` to reset to `PENDING`. Set `requeue: false` to move directly to `DEAD`.
-
-### Dashboard Endpoints
-
-#### Broker Overview
-```
-GET /dashboard/overview
-```
-
-#### Queue Breakdown
-```
-GET /dashboard/queues
-```
-
-#### Dead Letter Queue
-```
-GET /dashboard/dlq
-```
-
-#### Replay a Dead Message
-```
-POST /dashboard/dlq/{messageId}/replay
-```
+Interactive docs: `http://localhost:8080/swagger-ui.html`.
 
 ### WebSocket
 
@@ -358,17 +296,21 @@ Event types: `PUBLISHED`, `CONSUMED`, `ACKED`, `NACKED`, `REDELIVERED`, `DEAD`, 
 All errors return a consistent shape:
 ```json
 {
-  "status": 400,
+  "status": 404,
   "message": "No Topic found with the name order.placed",
   "errors": null,
   "response_body": null
 }
 ```
 
-| Status | Meaning |
-|---|---|
-| `400` | Client error — invalid input, resource not found, wrong state |
-| `500` | Server error — unexpected failure |
+| Status | Meaning | Retry? |
+|---|---|---|
+| `204` | Consume found nothing claimable right now | Poll again later |
+| `400` | Invalid input: bad name, missing field, malformed JSON | No, fix the request |
+| `404` | Topic, queue or message does not exist | No |
+| `409` | Conflicts with current state: duplicate name, message not `UNACKED`, held by another consumer | No |
+| `413` | Payload over the size limit | No, send less |
+| `500` | Unexpected server failure (details are logged, never returned) | Yes, with backoff |
 
 ---
 

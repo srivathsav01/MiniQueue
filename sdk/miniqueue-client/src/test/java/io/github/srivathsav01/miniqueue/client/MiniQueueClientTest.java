@@ -38,7 +38,7 @@ class MiniQueueClientTest {
     // What the client actually sent, recorded by the stub.
     private volatile String sentMethod;
     private volatile String sentPath;
-    private volatile String sentQuery;
+    private volatile String sentRawPath;
     private volatile String sentBody;
 
     @BeforeEach
@@ -47,7 +47,7 @@ class MiniQueueClientTest {
         server.createContext("/", exchange -> {
             sentMethod = exchange.getRequestMethod();
             sentPath = exchange.getRequestURI().getPath();
-            sentQuery = exchange.getRequestURI().getRawQuery();
+            sentRawPath = exchange.getRequestURI().getRawPath();
             sentBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
 
             byte[] bytes = replyBody == null ? new byte[0] : replyBody.getBytes(StandardCharsets.UTF_8);
@@ -74,7 +74,7 @@ class MiniQueueClientTest {
     }
 
     @Test
-    void consumeReturnsTheClaimedMessage() {
+    void consumeReturnsTheClaimedMessage() throws IOException {
         UUID id = UUID.randomUUID();
         replyBody = """
                 {"status":200,"response_body":{
@@ -90,9 +90,9 @@ class MiniQueueClientTest {
         assertEquals("{\"orderId\":42}", message.get().payload());
         assertEquals(LocalDateTime.of(2026, 10, 16, 12, 30, 45, 123_456_000), message.get().publishedAt());
 
-        assertEquals("GET", sentMethod);
-        assertEquals("/consumer/consumeMessage", sentPath);
-        assertEquals("queue_name=email-queue&consumer_id=email-service", sentQuery);
+        assertEquals("POST", sentMethod);
+        assertEquals("/api/v1/queues/email-queue/consume", sentPath);
+        assertEquals("email-service", json.readTree(sentBody).get("consumer_id").asText());
     }
 
     @Test
@@ -104,13 +104,13 @@ class MiniQueueClientTest {
     }
 
     @Test
-    void consumeUrlEncodesNames() {
+    void consumeEncodesTheQueueNameAsAPathSegment() {
         replyStatus = 204;
         replyBody = null;
-
-        client.consume("my queue&more", "worker 1");
-
-        assertEquals("queue_name=my+queue%26more&consumer_id=worker+1", sentQuery);
+        client.consume("my queue/more", "worker 1");
+        // The raw path keeps the encoding: a space is %20 (not '+'), and a '/' cannot
+        // split the name into two path segments.
+        assertEquals("/api/v1/queues/my%20queue%2Fmore/consume", sentRawPath);
     }
 
     @Test
@@ -119,8 +119,7 @@ class MiniQueueClientTest {
 
         JsonNode body = json.readTree(sentBody);
         assertEquals("POST", sentMethod);
-        assertEquals("/messages/publishMessage", sentPath);
-        assertEquals("order.placed", body.get("topic_name").asText());
+        assertEquals("/api/v1/topics/order.placed/messages", sentPath);
         assertEquals("{\"orderId\":42}", body.get("payload").asText());
     }
 
@@ -131,17 +130,17 @@ class MiniQueueClientTest {
         client.ack(id, "email-service");
 
         JsonNode body = json.readTree(sentBody);
-        assertEquals("/consumer/ackMessage", sentPath);
-        assertEquals(id.toString(), body.get("message_id").asText());
+        assertEquals("/api/v1/messages/" + id + "/ack", sentPath);
         assertEquals("email-service", body.get("consumer_id").asText());
     }
 
     @Test
     void nackSendsRequeueFlag() throws IOException {
-        client.nack(UUID.randomUUID(), "email-service", false);
+        UUID id = UUID.randomUUID();
+        client.nack(id, "email-service", false);
 
         JsonNode body = json.readTree(sentBody);
-        assertEquals("/consumer/nackMessage", sentPath);
+        assertEquals("/api/v1/messages/" + id + "/nack", sentPath);
         assertFalse(body.get("requeue").asBoolean());
     }
 

@@ -17,28 +17,29 @@ TOPIC="load.topic.$RUN"
 QUEUE="load-queue-$RUN"
 
 echo "Creating topic '$TOPIC' and queue '$QUEUE' on $BASE"
-curl -sf -o /dev/null -X POST "$BASE/topics/createTopic" \
+curl -sf -o /dev/null -X POST "$BASE/api/v1/topics" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$TOPIC\"}"
-curl -sf -o /dev/null -X POST "$BASE/queues/createQueue" \
+curl -sf -o /dev/null -X POST "$BASE/api/v1/queues" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QUEUE\",\"topic_name\":\"$TOPIC\"}"
 
 echo
 echo "Publishing $MESSAGES messages, $PARALLEL at a time. HTTP status counts:"
 seq 1 "$MESSAGES" | xargs -P "$PARALLEL" -I{} \
-  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/messages/publishMessage" \
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/v1/topics/$TOPIC/messages" \
     -H 'Content-Type: application/json' \
-    -d "{\"topic_name\":\"$TOPIC\",\"payload\":\"load message {}\"}" \
+    -d "{\"payload\":\"load message {}\"}" \
   | sort | uniq -c
 
 echo
 echo "Consuming $MESSAGES messages, $PARALLEL at a time. HTTP status counts:"
 seq 1 "$MESSAGES" | xargs -P "$PARALLEL" -I{} \
-  curl -s -o /dev/null -w "%{http_code}\n" \
-    "$BASE/consumer/consumeMessage?queue_name=$QUEUE&consumer_id=load-consumer-{}" \
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/v1/queues/$QUEUE/consume" \
+    -H 'Content-Type: application/json' \
+    -d "{\"consumer_id\":\"load-consumer-{}\"}" \
   | sort | uniq -c
 
 echo
-echo "Done. Expected: almost all 200s. A few 400s on consume are normal (see notes)."
+echo "Done. Expected: almost all 200s. A few 204s on consume are normal: nothing was claimable at that instant."
 echo "Any 500 means something broke: check the backend logs."

@@ -12,7 +12,4 @@ public class AckRequest {
 
     @JsonProperty("consumer_id")
     private String consumerId;
-
-    @JsonProperty("message_id")
-    private UUID messageId;
 }
