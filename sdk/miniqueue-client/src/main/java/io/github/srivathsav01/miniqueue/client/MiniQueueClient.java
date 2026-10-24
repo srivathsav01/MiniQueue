@@ -23,13 +23,15 @@ import java.util.UUID;
  * Plain-Java client for the MiniQueue broker.
  *
  * <pre>{@code
- * MiniQueueClient client = MiniQueueClient.builder("http://localhost:8080").build();
+ * MiniQueueClient client = MiniQueueClient.builder("http://localhost:8080")
+ *         .apiKey(System.getenv("MINIQUEUE_API_KEY"))
+ *         .build();
  *
  * client.publish("order.placed", "{\"orderId\": 42}");
  *
- * client.consume("email-queue", "email-service").ifPresent(message -> {
+ * client.consume("email-queue").ifPresent(message -> {
  *     sendEmail(message.payload());
- *     client.ack(message.id(), "email-service");
+ *     client.ack(message.id());
  * });
  * }</pre>
  *
@@ -48,7 +50,13 @@ public final class MiniQueueClient {
 
     static final String USER_AGENT = "miniqueue-java-client/0.1.0";
 
+    /** Optional header that tells replicas of the same client apart. */
+    static final String INSTANCE_HEADER = "MiniQueue-Instance";
+
     private final String baseUrl;
+    // Never logged and never put in an exception message: anyone who sees it can act as this client.
+    private final String apiKey;
+    private final String instanceId;
     private final Duration requestTimeout;
     private final RetryPolicy retryPolicy;
     private final HttpClient http;
@@ -56,6 +64,8 @@ public final class MiniQueueClient {
 
     private MiniQueueClient(Builder builder) {
         this.baseUrl = builder.baseUrl;
+        this.apiKey = builder.apiKey;
+        this.instanceId = builder.instanceId;
         this.requestTimeout = builder.requestTimeout;
         this.retryPolicy = builder.retryPolicy;
         this.http = HttpClient.newBuilder()
@@ -91,18 +101,18 @@ public final class MiniQueueClient {
      * error: either the queue is empty, or every remaining message is momentarily held
      * by other consumers. Poll again later.
      *
-     * The returned message must be acked or nacked by the same consumerId, otherwise
-     * the broker redelivers it after its ack timeout.
+     * The broker records the claim under this client's identity (the name its API key
+     * was registered with, plus the instance id if one is set). The message must be acked
+     * or nacked by the same client and instance, otherwise the broker redelivers it after
+     * its ack timeout.
      *
-     * @throws MiniQueueException.NotFound if the queue does not exist
+     * @throws MiniQueueException.NotFound  if the queue does not exist
+     * @throws MiniQueueException.Forbidden if this key has no consume scope for the queue
      */
-    public Optional<ReceivedMessage> consume(String queue, String consumerId) {
+    public Optional<ReceivedMessage> consume(String queue) {
         requireText(queue, "queue");
-        requireText(consumerId, "consumerId");
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("consumer_id", consumerId);
-        HttpResponse<String> response = send(post(API + "/queues/" + pathSegment(queue) + "/consume", body));
+        HttpResponse<String> response = send(postWithoutBody(API + "/queues/" + pathSegment(queue) + "/consume"));
 
         if (response.statusCode() == 204) {
             return Optional.empty();
@@ -119,13 +129,10 @@ public final class MiniQueueClient {
      *                                     after the ack timeout)
      * @throws MiniQueueException.NotFound if no message has this id
      */
-    public void ack(UUID messageId, String consumerId) {
+    public void ack(UUID messageId) {
         Objects.requireNonNull(messageId, "messageId");
-        requireText(consumerId, "consumerId");
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("consumer_id", consumerId);
-        send(post(API + "/messages/" + messageId + "/ack", body));
+        send(postWithoutBody(API + "/messages/" + messageId + "/ack"));
     }
 
     /**
@@ -137,12 +144,10 @@ public final class MiniQueueClient {
      *                                     belongs to another consumer
      * @throws MiniQueueException.NotFound if no message has this id
      */
-    public void nack(UUID messageId, String consumerId, boolean requeue) {
+    public void nack(UUID messageId, boolean requeue) {
         Objects.requireNonNull(messageId, "messageId");
-        requireText(consumerId, "consumerId");
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("consumer_id", consumerId);
         body.put("requeue", requeue);
         send(post(API + "/messages/" + messageId + "/nack", body));
     }
@@ -165,11 +170,20 @@ public final class MiniQueueClient {
                 .build();
     }
 
+    private HttpRequest postWithoutBody(String path) {
+        return newRequest(path).POST(HttpRequest.BodyPublishers.noBody()).build();
+    }
+
     private HttpRequest.Builder newRequest(String pathAndQuery) {
-        return HttpRequest.newBuilder(URI.create(baseUrl + pathAndQuery))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(baseUrl + pathAndQuery))
                 .timeout(requestTimeout)
                 .header("Accept", "application/json")
-                .header("User-Agent", USER_AGENT);
+                .header("User-Agent", USER_AGENT)
+                .header("Authorization", "Bearer " + apiKey);
+        if (instanceId != null) {
+            request.header(INSTANCE_HEADER, instanceId);
+        }
+        return request;
     }
 
     /**
@@ -208,6 +222,8 @@ public final class MiniQueueClient {
         String message = errorMessage(status, response.body());
         throw switch (status) {
             case 400 -> new MiniQueueException.BadRequest(message);
+            case 401 -> new MiniQueueException.Unauthorized(message);
+            case 403 -> new MiniQueueException.Forbidden(message);
             case 404 -> new MiniQueueException.NotFound(message);
             case 409 -> new MiniQueueException.Conflict(message);
             case 413 -> new MiniQueueException.PayloadTooLarge(message);
@@ -284,6 +300,8 @@ public final class MiniQueueClient {
     public static final class Builder {
 
         private final String baseUrl;
+        private String apiKey;
+        private String instanceId;
         private Duration connectTimeout = Duration.ofSeconds(5);
         private Duration requestTimeout = Duration.ofSeconds(10);
         private RetryPolicy retryPolicy = RetryPolicy.defaults();
@@ -295,6 +313,28 @@ public final class MiniQueueClient {
             }
             // Strip trailing slashes so "http://host/" + "/messages" never becomes "//messages".
             this.baseUrl = baseUrl.replaceAll("/+$", "");
+        }
+
+        /**
+         * The API key this client authenticates with (required). An admin creates it with
+         * {@code POST /api/v1/clients}; its scopes decide which topics this client may publish
+         * to and which queues it may consume from. Load it from the environment or a secret
+         * store, never from source code.
+         */
+        public Builder apiKey(String apiKey) {
+            this.apiKey = requireText(apiKey, "apiKey").trim();
+            return this;
+        }
+
+        /**
+         * Optional. Tells replicas of the same client apart, e.g. a pod or host name. Set it
+         * when several instances share one API key and consume: the broker then rejects a late
+         * ack from instance A after the message was redelivered to instance B. Must follow the
+         * broker's name rules (a-z, 0-9, '.', '_', '-').
+         */
+        public Builder instanceId(String instanceId) {
+            this.instanceId = requireText(instanceId, "instanceId").trim();
+            return this;
         }
 
         /** How long to wait to open a TCP connection. Default 5 seconds. */
@@ -316,6 +356,9 @@ public final class MiniQueueClient {
         }
 
         public MiniQueueClient build() {
+            if (apiKey == null) {
+                throw new IllegalStateException("apiKey is required: every MiniQueue call is authenticated");
+            }
             return new MiniQueueClient(this);
         }
 

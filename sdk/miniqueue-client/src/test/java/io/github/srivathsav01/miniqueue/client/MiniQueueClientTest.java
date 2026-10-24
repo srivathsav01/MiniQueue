@@ -14,10 +14,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests the client against a tiny stub HTTP server built into the JDK
@@ -26,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class MiniQueueClientTest {
 
+    private static final String API_KEY = "mq_test-key-0123456789abcdefghijklmnopqrstuv";
     private final ObjectMapper json = new ObjectMapper();
 
     private HttpServer server;
@@ -40,6 +38,8 @@ class MiniQueueClientTest {
     private volatile String sentPath;
     private volatile String sentRawPath;
     private volatile String sentBody;
+    private volatile String sentAuthorization;
+    private volatile String sentInstance;
 
     @BeforeEach
     void startStubBroker() throws IOException {
@@ -49,6 +49,8 @@ class MiniQueueClientTest {
             sentPath = exchange.getRequestURI().getPath();
             sentRawPath = exchange.getRequestURI().getRawPath();
             sentBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            sentAuthorization = exchange.getRequestHeaders().getFirst("Authorization");
+            sentInstance = exchange.getRequestHeaders().getFirst("MiniQueue-Instance");
 
             byte[] bytes = replyBody == null ? new byte[0] : replyBody.getBytes(StandardCharsets.UTF_8);
             if (bytes.length == 0) {
@@ -64,6 +66,7 @@ class MiniQueueClientTest {
         // Retries are tested in RetryPolicyTest. Here each call must hit the stub exactly once,
         // and the 500 / connection-failure tests must not wait through backoff sleeps.
         client = MiniQueueClient.builder("http://127.0.0.1:" + server.getAddress().getPort() + "/")
+                .apiKey(API_KEY)
                 .retryPolicy(RetryPolicy.none())
                 .build();
     }
@@ -74,7 +77,7 @@ class MiniQueueClientTest {
     }
 
     @Test
-    void consumeReturnsTheClaimedMessage() throws IOException {
+    void consumeReturnsTheClaimedMessage() {
         UUID id = UUID.randomUUID();
         replyBody = """
                 {"status":200,"response_body":{
@@ -82,7 +85,7 @@ class MiniQueueClientTest {
                   "payload":"{\\"orderId\\":42}","published_at":"2026-10-16T12:30:45.123456"}}
                 """.formatted(id);
 
-        Optional<ReceivedMessage> message = client.consume("email-queue", "email-service");
+        Optional<ReceivedMessage> message = client.consume("email-queue");
 
         assertTrue(message.isPresent());
         assertEquals(id, message.get().id());
@@ -92,7 +95,7 @@ class MiniQueueClientTest {
 
         assertEquals("POST", sentMethod);
         assertEquals("/api/v1/queues/email-queue/consume", sentPath);
-        assertEquals("email-service", json.readTree(sentBody).get("consumer_id").asText());
+        assertEquals("", sentBody, "the broker takes the consumer's identity from the key, not the body");
     }
 
     @Test
@@ -100,14 +103,14 @@ class MiniQueueClientTest {
         replyStatus = 204;
         replyBody = null;
 
-        assertTrue(client.consume("email-queue", "email-service").isEmpty());
+        assertTrue(client.consume("email-queue").isEmpty());
     }
 
     @Test
     void consumeEncodesTheQueueNameAsAPathSegment() {
         replyStatus = 204;
         replyBody = null;
-        client.consume("my queue/more", "worker 1");
+        client.consume("my queue/more");
         // The raw path keeps the encoding: a space is %20 (not '+'), and a '/' cannot
         // split the name into two path segments.
         assertEquals("/api/v1/queues/my%20queue%2Fmore/consume", sentRawPath);
@@ -124,20 +127,19 @@ class MiniQueueClientTest {
     }
 
     @Test
-    void ackSendsMessageIdAndConsumerId() throws IOException {
+    void ackSendsTheMessageIdInThePathAndNoBody() {
         UUID id = UUID.randomUUID();
 
-        client.ack(id, "email-service");
+        client.ack(id);
 
-        JsonNode body = json.readTree(sentBody);
         assertEquals("/api/v1/messages/" + id + "/ack", sentPath);
-        assertEquals("email-service", body.get("consumer_id").asText());
+        assertEquals("", sentBody);
     }
 
     @Test
     void nackSendsRequeueFlag() throws IOException {
         UUID id = UUID.randomUUID();
-        client.nack(id, "email-service", false);
+        client.nack(id, false);
 
         JsonNode body = json.readTree(sentBody);
         assertEquals("/api/v1/messages/" + id + "/nack", sentPath);
@@ -150,7 +152,7 @@ class MiniQueueClientTest {
         replyBody = "{\"status\":404,\"message\":\"No Queue found with the name missing\"}";
 
         MiniQueueException.NotFound e = assertThrows(MiniQueueException.NotFound.class,
-                () -> client.consume("missing", "email-service"));
+                () -> client.consume("missing"));
 
         assertEquals(404, e.statusCode());
         assertFalse(e.isRetryable());
@@ -163,7 +165,7 @@ class MiniQueueClientTest {
         replyBody = "{\"status\":409,\"message\":\"The message is not in unacked state\"}";
 
         MiniQueueException.Conflict e = assertThrows(MiniQueueException.Conflict.class,
-                () -> client.ack(UUID.randomUUID(), "email-service"));
+                () -> client.ack(UUID.randomUUID()));
 
         assertFalse(e.isRetryable());
     }
@@ -193,7 +195,7 @@ class MiniQueueClientTest {
 
     @Test
     void blankArgumentsAreRejectedBeforeAnyHttpCall() {
-        assertThrows(IllegalArgumentException.class, () -> client.consume(" ", "email-service"));
+        assertThrows(IllegalArgumentException.class, () -> client.consume(" "));
         assertThrows(IllegalArgumentException.class, () -> MiniQueueClient.builder("localhost:8080"));
     }
 
@@ -205,6 +207,60 @@ class MiniQueueClientTest {
         MiniQueueException.PayloadTooLarge e = assertThrows(MiniQueueException.PayloadTooLarge.class,
                 () -> client.publish("order.placed", "{}"));
 
+        assertFalse(e.isRetryable());
+    }
+
+    @Test
+    void everyRequestCarriesTheApiKey() {
+        client.publish("order.placed", "{}");
+        assertEquals("Bearer " + API_KEY, sentAuthorization);
+
+        client.ack(UUID.randomUUID());
+        assertEquals("Bearer " + API_KEY, sentAuthorization);
+    }
+
+    @Test
+    void theInstanceHeaderIsSentOnlyWhenConfigured() {
+        client.ack(UUID.randomUUID());
+        assertNull(sentInstance);
+
+        MiniQueueClient withInstance = MiniQueueClient.builder("http://127.0.0.1:" + server.getAddress().getPort())
+                .apiKey(API_KEY)
+                .instanceId("pod-2")
+                .retryPolicy(RetryPolicy.none())
+                .build();
+        withInstance.ack(UUID.randomUUID());
+        assertEquals("pod-2", sentInstance);
+    }
+
+    @Test
+    void buildingWithoutAnApiKeyFailsFast() {
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> MiniQueueClient.builder("http://localhost:8080").build());
+        assertTrue(e.getMessage().contains("apiKey"));
+    }
+
+    @Test
+    void unauthorizedIsNotRetryableAndNeverEchoesTheKey() {
+        replyStatus = 401;
+        replyBody = "{\"status\":401,\"message\":\"Missing, invalid or revoked API key\"}";
+
+        MiniQueueException.Unauthorized e = assertThrows(MiniQueueException.Unauthorized.class,
+                () -> client.publish("order.placed", "{}"));
+
+        assertFalse(e.isRetryable());
+        assertFalse(e.getMessage().contains(API_KEY), "an exception message can end up in logs");
+    }
+
+    @Test
+    void forbiddenIsNotRetryable() {
+        replyStatus = 403;
+        replyBody = "{\"status\":403,\"message\":\"This API key is not allowed to do this\"}";
+
+        MiniQueueException.Forbidden e = assertThrows(MiniQueueException.Forbidden.class,
+                () -> client.consume("someone-elses-queue"));
+
+        assertEquals(403, e.statusCode());
         assertFalse(e.isRetryable());
     }
 }

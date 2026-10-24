@@ -5,7 +5,7 @@
 #
 # Usage:   ./load-test.sh
 # Options: BASE=http://localhost:8080 MESSAGES=200 PARALLEL=20 ./load-test.sh
-set -euo pipefail
+set -euo pipefail : "${ADMIN_KEY:?Set ADMIN_KEY to your bootstrap admin key: ADMIN_KEY=mq_... ./load-test.sh}"
 
 BASE="${BASE:-http://localhost:8080}"
 MESSAGES="${MESSAGES:-200}"
@@ -24,10 +24,18 @@ curl -sf -o /dev/null -X POST "$BASE/api/v1/queues" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QUEUE\",\"topic_name\":\"$TOPIC\"}"
 
+# A client allowed to publish to this run's topic and consume from this run's queue.
+KEY=$(curl -sf -X POST "$BASE/api/v1/clients" \
+  -H "Authorization: Bearer $ADMIN_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"load-$RUN\",\"scopes\":[\"publish:$TOPIC\",\"consume:$QUEUE\"]}" \
+  | sed -E 's/.*"api_key":"([^"]+)".*/\1/')
+
 echo
 echo "Publishing $MESSAGES messages, $PARALLEL at a time. HTTP status counts:"
 seq 1 "$MESSAGES" | xargs -P "$PARALLEL" -I{} \
   curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/v1/topics/$TOPIC/messages" \
+    -H "Authorization: Bearer $KEY" \
     -H 'Content-Type: application/json' \
     -d "{\"payload\":\"load message {}\"}" \
   | sort | uniq -c
@@ -36,8 +44,8 @@ echo
 echo "Consuming $MESSAGES messages, $PARALLEL at a time. HTTP status counts:"
 seq 1 "$MESSAGES" | xargs -P "$PARALLEL" -I{} \
   curl -s -o /dev/null -w "%{http_code}\n" -X POST "$BASE/api/v1/queues/$QUEUE/consume" \
-    -H 'Content-Type: application/json' \
-    -d "{\"consumer_id\":\"load-consumer-{}\"}" \
+    -H "Authorization: Bearer $KEY" \
+    -H "MiniQueue-Instance: worker-{}" \
   | sort | uniq -c
 
 echo

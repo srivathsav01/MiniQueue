@@ -23,7 +23,10 @@ class MiniQueueConsumerTest {
     @BeforeEach
     void setUp() throws Exception {
         broker = new StubBroker();
-        client = MiniQueueClient.builder(broker.url()).retryPolicy(RetryPolicy.none()).build();
+        client = MiniQueueClient.builder(broker.url())
+                .apiKey("mq_test-key-0123456789abcdefghijklmnopqrstuv")
+                .retryPolicy(RetryPolicy.none())
+                .build();
     }
 
     @AfterEach
@@ -32,8 +35,7 @@ class MiniQueueConsumerTest {
     }
 
     private MiniQueueConsumer.Builder consumer(MessageHandler handler) {
-        return MiniQueueConsumer.builder(client, "test-queue", "test-consumer", handler)
-                .pollInterval(Duration.ofMillis(10), Duration.ofMillis(50)); // fast polling for tests
+        return MiniQueueConsumer.builder(client, "test-queue", handler);
     }
 
     @Test

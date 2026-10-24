@@ -36,13 +36,6 @@ public @interface MiniQueueListener {
     /** The queue to consume from. Supports placeholders, e.g. {@code "${app.queues.email}"}. */
     String queue();
 
-    /**
-     * Overrides the consumer id for this listener. Leave empty to use
-     * {@code miniqueue.client.consumer.consumer-id}, or a generated id that is unique to this
-     * application instance. Supports placeholders.
-     */
-    String consumerId() default "";
-
     /** Worker threads for this listener. 0 (the default) uses {@code miniqueue.client.consumer.concurrency}. */
     int concurrency() default 0;
 }

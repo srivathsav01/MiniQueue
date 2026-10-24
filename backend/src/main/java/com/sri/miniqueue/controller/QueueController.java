@@ -1,6 +1,5 @@
 package com.sri.miniqueue.controller;
 
-import com.sri.miniqueue.dto.ConsumeRequest;
 import com.sri.miniqueue.dto.ConsumeResponse;
 import com.sri.miniqueue.dto.CreateQueueRequest;
 import com.sri.miniqueue.dto.MessageResponse;
@@ -8,9 +7,11 @@ import com.sri.miniqueue.dto.QueueResponse;
 import com.sri.miniqueue.dto.Response;
 import com.sri.miniqueue.mapper.QueueMapper;
 import com.sri.miniqueue.mapper.ResponseBuilder;
+import com.sri.miniqueue.security.ClientPrincipal;
 import com.sri.miniqueue.service.MessageService;
 import com.sri.miniqueue.utils.APIConstants;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -42,12 +43,12 @@ public class QueueController {
         return ResponseBuilder.createSuccessData(messageService.getMessagesByQueue(queueName));
     }
 
-    // POST /api/v1/queues/{queueName}/consume
-    // POST, not GET: consuming claims a message (PENDING -> UNACKED). GET must be safe to
-    // repeat, and browsers, proxies and link prefetchers are allowed to resend a GET.
-    // 200 with the message, or 204 when nothing is claimable right now.
+    // POST /api/v1/queues/{queueName}/consume   (no body)
+// The consumer is whoever owns the API key, not whatever the request claims.
     @PostMapping("/{queueName}/consume")
-    public Response<ConsumeResponse> consumeMessage(@PathVariable String queueName, @RequestBody ConsumeRequest request) {
-        return ResponseBuilder.createSuccessData(messageService.consumeMessage(queueName, request.getConsumerId()));
+    public Response<ConsumeResponse> consumeMessage(@PathVariable String queueName,
+                                                    @AuthenticationPrincipal ClientPrincipal client,
+                                                    @RequestHeader(value = APIConstants.INSTANCE_HEADER, required = false) String instance) {
+        return ResponseBuilder.createSuccessData(messageService.consumeMessage(queueName, client.consumerId(instance)));
     }
 }

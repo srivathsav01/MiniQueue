@@ -13,6 +13,9 @@ miniqueue:
     batch-size: 100
   limits:
     max-payload-bytes: 262144 #256 KB
+  security:
+    # The first admin key. Generate one with: echo "mq_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+    bootstrap-admin-key: ${MINIQUEUE_BOOTSTRAP_ADMIN_KEY:}
 
 spring:
   application:
@@ -35,6 +38,8 @@ spring:
     enabled: true
   swagger-ui:
     enabled: true
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 
 management:
   endpoints:

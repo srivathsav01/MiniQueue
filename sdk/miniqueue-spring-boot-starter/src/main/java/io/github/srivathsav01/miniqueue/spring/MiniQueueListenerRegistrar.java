@@ -52,7 +52,6 @@ public class MiniQueueListenerRegistrar implements BeanPostProcessor, SmartLifec
     private final List<Endpoint> endpoints = new CopyOnWriteArrayList<>();
     private final List<MiniQueueConsumer> consumers = new CopyOnWriteArrayList<>();
     private Environment environment;
-    private String generatedConsumerId;
     private volatile boolean running;
 
     public MiniQueueListenerRegistrar(ObjectProvider<MiniQueueClient> clientProvider,
@@ -128,11 +127,10 @@ public class MiniQueueListenerRegistrar implements BeanPostProcessor, SmartLifec
                                             MiniQueueProperties.Consumer defaults) {
         MiniQueueListener annotation = endpoint.annotation();
         String queue = environment.resolveRequiredPlaceholders(annotation.queue());
-        String consumerId = resolveConsumerId(annotation, defaults);
         int concurrency = annotation.concurrency() > 0 ? annotation.concurrency() : defaults.getConcurrency();
 
         MiniQueueConsumer consumer = MiniQueueConsumer
-                .builder(client, queue, consumerId, handlerFor(endpoint))
+                .builder(client, queue, handlerFor(endpoint))
                 .concurrency(concurrency)
                 .pollInterval(defaults.getMinPollInterval(), defaults.getMaxPollInterval())
                 .shutdownTimeout(defaults.getShutdownTimeout())
@@ -140,28 +138,8 @@ public class MiniQueueListenerRegistrar implements BeanPostProcessor, SmartLifec
                 .start();
 
         log.info("@MiniQueueListener " + endpoint.beanName() + "." + endpoint.method().getName()
-                + " consuming queue '" + queue + "' as '" + consumerId + "' with " + concurrency + " worker(s)");
+                + " consuming queue '" + queue + "' with " + concurrency + " worker(s)");
         return consumer;
-    }
-
-    /**
-     * Annotation value, then the configured property, then a generated id. The generated id
-     * is unique per running instance on purpose: if two instances shared one consumer id,
-     * a message redelivered from instance A to instance B could still be acked by A's late,
-     * stale ack, because the broker's fencing check only compares consumer ids.
-     */
-    private String resolveConsumerId(MiniQueueListener annotation, MiniQueueProperties.Consumer defaults) {
-        if (!annotation.consumerId().isBlank()) {
-            return environment.resolveRequiredPlaceholders(annotation.consumerId());
-        }
-        if (defaults.getConsumerId() != null && !defaults.getConsumerId().isBlank()) {
-            return defaults.getConsumerId();
-        }
-        if (generatedConsumerId == null) {
-            String application = environment.getProperty("spring.application.name", "miniqueue-consumer");
-            generatedConsumerId = application + "-" + UUID.randomUUID().toString().substring(0, 8);
-        }
-        return generatedConsumerId;
     }
 
     /** Adapts the annotated method to the SDK's MessageHandler interface. */

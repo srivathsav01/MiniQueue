@@ -1,9 +1,5 @@
 package io.github.srivathsav01.miniqueue.client;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,8 +26,9 @@ public class LiveConsumerCheck {
         String topic = "sdk.consumer." + run;
         String queue = "sdk-consumer-" + run;
 
-        createTopicAndQueue(baseUrl, topic, queue);
-        MiniQueueClient client = MiniQueueClient.builder(baseUrl).build();
+        LiveSetup.createTopicAndQueue(baseUrl, topic, queue);
+        String apiKey = LiveSetup.registerClient(baseUrl, "sdk-consumer-" + run, "publish:" + topic, "consume:" + queue);
+        MiniQueueClient client = MiniQueueClient.builder(baseUrl).apiKey(apiKey).build();
 
         for (int i = 1; i <= NORMAL_MESSAGES; i++) {
             client.publish(topic, "order-" + i);
@@ -55,7 +52,7 @@ public class LiveConsumerCheck {
         };
 
         try (MiniQueueConsumer consumer = MiniQueueConsumer
-                .builder(client, queue, "sdk-live-consumer", handler)
+                .builder(client, queue, handler)
                 .concurrency(4)
                 .pollInterval(Duration.ofMillis(50), Duration.ofMillis(500))
                 .build()
@@ -83,22 +80,6 @@ public class LiveConsumerCheck {
         System.out.println();
         System.out.println("ALL CHECKS PASSED. Open the dashboard's Dead Letter Queue: the 'poison' message from "
                 + queue + " should be there.");
-    }
-
-    private static void createTopicAndQueue(String baseUrl, String topic, String queue) throws Exception {
-        HttpClient http = HttpClient.newHttpClient();
-        post(http, baseUrl + "/api/v1/topics", "{\"name\":\"" + topic + "\"}");
-        post(http, baseUrl + "/api/v1/queues", "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
-    }
-
-    private static void post(HttpClient http, String url, String body) throws Exception {
-        HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build(), HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() / 100 != 2) {
-            throw new IllegalStateException("Setup failed: " + url + " -> " + response.statusCode() + " " + response.body());
-        }
     }
 
     private static void check(boolean condition, String what) {

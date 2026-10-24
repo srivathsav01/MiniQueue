@@ -7,5 +7,8 @@ public interface APIConstants {
     String QUEUES = "/queues";
     String MESSAGES = "/messages";
     String DASHBOARD = "/dashboard";
+    String CLIENTS = "/clients";
 
+    /** Optional header that tells replicas of one client apart, e.g. "pod-2". */
+    String INSTANCE_HEADER = "MiniQueue-Instance";
 }

@@ -10,8 +10,5 @@ import java.util.UUID;
 @Setter
 public class NackRequest {
 
-    @JsonProperty("consumer_id")
-    private String consumerId;
-
     private Boolean requeue;
 }

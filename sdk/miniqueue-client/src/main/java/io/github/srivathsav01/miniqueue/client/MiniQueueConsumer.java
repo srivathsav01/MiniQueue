@@ -20,7 +20,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * MiniQueueClient client = MiniQueueClient.builder("http://localhost:8080").build();
  *
  * MiniQueueConsumer consumer = MiniQueueConsumer
- *         .builder(client, "email-queue", "email-service", message -> sendEmail(message.payload()))
+ *         .builder(client, "email-queue", message -> sendEmail(message.payload()))
+ *         .apiKey(...)
  *         .concurrency(4)
  *         .build()
  *         .start();
@@ -46,7 +47,6 @@ public final class MiniQueueConsumer implements AutoCloseable {
 
     private final MiniQueueClient client;
     private final String queue;
-    private final String consumerId;
     private final MessageHandler handler;
     private final int concurrency;
     private final long minPollMillis;
@@ -62,7 +62,6 @@ public final class MiniQueueConsumer implements AutoCloseable {
     private MiniQueueConsumer(Builder builder) {
         this.client = builder.client;
         this.queue = builder.queue;
-        this.consumerId = builder.consumerId;
         this.handler = builder.handler;
         this.concurrency = builder.concurrency;
         this.minPollMillis = builder.minPollInterval.toMillis();
@@ -71,11 +70,11 @@ public final class MiniQueueConsumer implements AutoCloseable {
     }
 
     /**
-     * @param consumerId identifies this service to the broker; every worker thread uses it,
-     *                   which is fine because the broker never hands one message to two claims
+     * Every worker thread consumes as the client's identity (its API key, plus its instance id
+     * if set). Sharing it between threads is fine: the broker never hands one message to two claims.
      */
-    public static Builder builder(MiniQueueClient client, String queue, String consumerId, MessageHandler handler) {
-        return new Builder(client, queue, consumerId, handler);
+    public static Builder builder(MiniQueueClient client, String queue, MessageHandler handler) {
+        return new Builder(client, queue, handler);
     }
 
     /** Starts the worker threads. Can be called only once. Returns this, for chaining. */
@@ -92,8 +91,7 @@ public final class MiniQueueConsumer implements AutoCloseable {
         for (int i = 0; i < concurrency; i++) {
             workers.submit(this::pollLoop);
         }
-        log.log(Level.INFO, () -> "Consuming queue '" + queue + "' as '" + consumerId
-                + "' with " + concurrency + " worker(s)");
+        log.log(Level.INFO, () -> "Consuming queue '" + queue + "' with " + concurrency + " worker(s)");
         return this;
     }
 
@@ -129,7 +127,7 @@ public final class MiniQueueConsumer implements AutoCloseable {
         long idleWaitMillis = minPollMillis;
         while (!stopping()) {
             try {
-                Optional<ReceivedMessage> next = client.consume(queue, consumerId);
+                Optional<ReceivedMessage> next = client.consume(queue);
                 if (next.isEmpty()) {
                     pause(idleWaitMillis);
                     idleWaitMillis = Math.min(idleWaitMillis * 2, maxPollMillis); // back off while idle
@@ -139,8 +137,9 @@ public final class MiniQueueConsumer implements AutoCloseable {
                 process(next.get());
             } catch (MiniQueueException e) {
                 // The client has already retried retryable failures. Either the broker is down
-                // for longer than that, or the request is wrong (for example the queue does not
-                // exist yet). Keep the worker alive, but wait the maximum before trying again.
+                // for longer than that, or the request is wrong: the queue does not exist yet,
+                // or the key lacks the consume scope (401/403). Keep the worker alive and wait the
+                // maximum before trying again, so an admin can fix the key without a restart.
                 log.log(Level.WARNING, () -> "Polling queue '" + queue + "' failed: " + e.getMessage()
                         + ". Retrying in " + maxPollMillis + "ms.");
                 pause(maxPollMillis);
@@ -157,10 +156,10 @@ public final class MiniQueueConsumer implements AutoCloseable {
         } catch (Exception handlerFailure) {
             log.log(Level.WARNING, () -> "Handler failed for message " + message.id()
                     + " on queue '" + queue + "'; nacking it for redelivery", handlerFailure);
-            settle("nack", message, () -> client.nack(message.id(), consumerId, true));
+            settle("nack", message, () -> client.nack(message.id(), true));
             return;
         }
-        settle("ack", message, () -> client.ack(message.id(), consumerId));
+        settle("ack", message, () -> client.ack(message.id()));
     }
 
     /** Acks or nacks. A failure here never loses the message: the broker redelivers it. */
@@ -198,17 +197,15 @@ public final class MiniQueueConsumer implements AutoCloseable {
 
         private final MiniQueueClient client;
         private final String queue;
-        private final String consumerId;
         private final MessageHandler handler;
         private int concurrency = 1;
         private Duration minPollInterval = Duration.ofMillis(100);
         private Duration maxPollInterval = Duration.ofSeconds(5);
         private Duration shutdownTimeout = Duration.ofSeconds(30);
 
-        private Builder(MiniQueueClient client, String queue, String consumerId, MessageHandler handler) {
+        private Builder(MiniQueueClient client, String queue, MessageHandler handler) {
             this.client = Objects.requireNonNull(client, "client");
             this.queue = requireText(queue, "queue");
-            this.consumerId = requireText(consumerId, "consumerId");
             this.handler = Objects.requireNonNull(handler, "handler");
         }
 

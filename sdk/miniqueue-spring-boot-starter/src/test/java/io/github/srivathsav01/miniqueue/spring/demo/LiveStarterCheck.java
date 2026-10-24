@@ -1,5 +1,6 @@
 package io.github.srivathsav01.miniqueue.spring.demo;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.srivathsav01.miniqueue.client.MiniQueueClient;
 import io.github.srivathsav01.miniqueue.spring.MiniQueueListener;
 import org.springframework.boot.SpringApplication;
@@ -11,6 +12,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -36,9 +39,11 @@ public class LiveStarterCheck {
         // The queue must exist before the listener starts polling it, so create it first.
         System.setProperty("demo.queue", queue);
         createTopicAndQueue(baseUrl, topic, queue);
+        String apiKey = registerClient(baseUrl, "starter-demo-" + run, "publish:" + topic, "consume:" + queue);
 
         ConfigurableApplicationContext context = SpringApplication.run(LiveStarterCheck.class,
                 "--miniqueue.client.base-url=" + baseUrl,
+                "--miniqueue.client.api-key=" + apiKey,
                 "--spring.application.name=starter-demo");
 
         // The auto-configured client bean, used here only to publish test messages.
@@ -78,18 +83,33 @@ public class LiveStarterCheck {
     }
 
     private static void createTopicAndQueue(String baseUrl, String topic, String queue) throws Exception {
-        HttpClient http = HttpClient.newHttpClient();
-        post(http, baseUrl + "/api/v1/topics", "{\"name\":\"" + topic + "\"}");
-        post(http, baseUrl + "/api/v1/queues", "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
+        post(baseUrl + "/api/v1/topics", null, "{\"name\":\"" + topic + "\"}");
+        post(baseUrl + "/api/v1/queues", null, "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
     }
 
-    private static void post(HttpClient http, String url, String body) throws Exception {
-        HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(url))
+    /** Registers a client with the admin key from MINIQUEUE_ADMIN_KEY and returns its new API key. */
+    private static String registerClient(String baseUrl, String name, String... scopes) throws Exception {
+        String adminKey = System.getenv("MINIQUEUE_ADMIN_KEY");
+        if (adminKey == null || adminKey.isBlank()) {
+            throw new IllegalStateException("Set MINIQUEUE_ADMIN_KEY to the broker's bootstrap admin key");
+        }
+        ObjectMapper json = new ObjectMapper();
+        String body = json.writeValueAsString(Map.of("name", name, "scopes", List.of(scopes)));
+        String response = post(baseUrl + "/api/v1/clients", adminKey, body);
+        return json.readTree(response).path("response_body").path("api_key").asText();
+    }
+
+    private static String post(String url, String bearer, String body) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build(), HttpResponse.BodyHandlers.ofString());
+                .POST(HttpRequest.BodyPublishers.ofString(body));
+        if (bearer != null) {
+            request.header("Authorization", "Bearer " + bearer);
+        }
+        HttpResponse<String> response = HttpClient.newHttpClient().send(request.build(), HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() / 100 != 2) {
             throw new IllegalStateException("Setup failed: " + url + " -> " + response.statusCode() + " " + response.body());
         }
+        return response.body();
     }
 }

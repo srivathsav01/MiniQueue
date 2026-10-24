@@ -16,6 +16,21 @@ public class MiniQueueProperties {
     /** Root URL of the MiniQueue broker. */
     private String baseUrl = "http://localhost:8080";
 
+    /**
+     * API key this application authenticates with (required). Ask the MiniQueue admin for
+     * one (POST /api/v1/clients); its scopes decide what this application may publish and
+     * consume. Pass it in through the environment, e.g. ${MINIQUEUE_API_KEY}, never commit it.
+     */
+    private String apiKey;
+
+    /**
+     * Tells instances of this application apart when several run with the same key, so the
+     * broker can reject a late ack from one instance after a message was redelivered to
+     * another. Leave unset to generate a random id per instance; set it to a stable,
+     * unique value such as the pod name if you want readable ids on the dashboard.
+     */
+    private String instanceId;
+
     /** How long to wait to open a connection to the broker. */
     private Duration connectTimeout = Duration.ofSeconds(5);
 
@@ -32,6 +47,22 @@ public class MiniQueueProperties {
 
     public void setBaseUrl(String baseUrl) {
         this.baseUrl = baseUrl;
+    }
+
+    public String getApiKey() {
+        return apiKey;
+    }
+
+    public void setApiKey(String apiKey) {
+        this.apiKey = apiKey;
+    }
+
+    public String getInstanceId() {
+        return instanceId;
+    }
+
+    public void setInstanceId(String instanceId) {
+        this.instanceId = instanceId;
     }
 
     public Duration getConnectTimeout() {
@@ -98,14 +129,6 @@ public class MiniQueueProperties {
     /** Defaults for every @MiniQueueListener. */
     public static class Consumer {
 
-        /**
-         * Consumer id sent to the broker. Leave unset to generate one that is unique to this
-         * application instance (spring.application.name plus a random suffix). If you set it,
-         * give each running instance a different value: the broker's fencing check, which
-         * rejects a late ack after a message was redelivered, compares consumer ids.
-         */
-        private String consumerId;
-
         /** Worker threads per listener, unless the annotation overrides it. */
         private int concurrency = 1;
 
@@ -120,14 +143,6 @@ public class MiniQueueProperties {
 
         /** Start listeners automatically when the application starts. */
         private boolean autoStartup = true;
-
-        public String getConsumerId() {
-            return consumerId;
-        }
-
-        public void setConsumerId(String consumerId) {
-            this.consumerId = consumerId;
-        }
 
         public int getConcurrency() {
             return concurrency;

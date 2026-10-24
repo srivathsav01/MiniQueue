@@ -236,6 +236,20 @@ Removing `SKIP LOCKED` from the consume query makes this test fail with duplicat
 
 ## API Reference
 
+### Authentication
+
+Producers and consumers authenticate with an API key: `Authorization: Bearer mq_...`. An admin registers each application as a **client** and chooses its scopes:
+
+| Scope | Allows |
+|---|---|
+| `publish:<topic>` / `publish:*` | Publishing to that topic / any topic |
+| `consume:<queue>` / `consume:*` | Consuming, acking and nacking on that queue / any queue |
+| `admin` | Everything, including `/api/v1/clients` |
+
+Keys are 256-bit random values. The broker stores only their SHA-256 hash, so a database leak does not leak working keys. The consumer identity recorded on a message is taken from the key (plus an optional `MiniQueue-Instance` header that tells replicas apart), never from the request, so one client cannot ack another client's message.
+
+The first admin key comes from `MINIQUEUE_BOOTSTRAP_ADMIN_KEY` at startup. Missing or invalid keys get `401`, valid keys without the needed scope get `403`.
+
 ### Broker Endpoints
 
 All REST endpoints are versioned under `/api/v1`. URLs name resources and the HTTP method says what happens to them; actions that change a message's state (consume, ack, nack, replay) are `POST`, because a `GET` must be safe for browsers and proxies to repeat.
@@ -248,13 +262,17 @@ All REST endpoints are versioned under `/api/v1`. URLs name resources and the HT
 | `GET` | `/api/v1/queues` | | List queues |
 | `GET` | `/api/v1/queues/{queue}/messages` | | Messages in a queue |
 | `POST` | `/api/v1/topics/{topic}/messages` | `{ "payload": "{\"orderId\": \"123\"}" }` | Publish to every queue bound to the topic |
-| `POST` | `/api/v1/queues/{queue}/consume` | `{ "consumer_id": "email-service" }` | Claim the oldest pending message: 200 with it, or 204 if none |
-| `POST` | `/api/v1/messages/{id}/ack` | `{ "consumer_id": "email-service" }` | Mark processed |
-| `POST` | `/api/v1/messages/{id}/nack` | `{ "consumer_id": "email-service", "requeue": true }` | Reject: `requeue: true` (default) retries, `false` moves it to the DLQ |
+| `POST` | `/api/v1/queues/{queue}/consume` | | Claim the oldest pending message: 200 with it, or 204 if none |
+| `POST` | `/api/v1/messages/{id}/ack` | | Mark processed |
+| `POST` | `/api/v1/messages/{id}/nack` | `{ "requeue": true }` (optional) | Reject: `requeue: true` (default) retries, `false` moves it to the DLQ |
 | `GET` | `/api/v1/dashboard/overview` | | Broker-wide counts by status |
 | `GET` | `/api/v1/dashboard/queues` | | Per-queue counts |
 | `GET` | `/api/v1/dashboard/dlq` | | Dead-lettered messages |
 | `POST` | `/api/v1/dashboard/dlq/{id}/replay` | | Move a dead message back to `PENDING` |
+| `POST` | `/api/v1/clients` | `{ "name": "mailer", "scopes": ["consume:email-queue"] }` | Register a client; the response holds its `api_key`, shown once |
+| `GET` | `/api/v1/clients` | | Active clients (key prefixes and last use, never keys) |
+| `POST` | `/api/v1/clients/{name}/rotate` | | New key; the old one stops working immediately |
+| `DELETE` | `/api/v1/clients/{name}` | | Revoke |
 
 Topic and queue names are lowercased and must be 1 to 100 characters from `a-z`, `0-9`, `.`, `_` and `-`. Payloads are limited to `miniqueue.limits.max-payload-bytes` (256 KB by default).
 
@@ -307,6 +325,8 @@ All errors return a consistent shape:
 |---|---|---|
 | `204` | Consume found nothing claimable right now | Poll again later |
 | `400` | Invalid input: bad name, missing field, malformed JSON | No, fix the request |
+| `401` | Missing, invalid or revoked API key | No, fix the key |
+| `403` | The key's scopes don't allow this | No, an admin must grant the scope |
 | `404` | Topic, queue or message does not exist | No |
 | `409` | Conflicts with current state: duplicate name, message not `UNACKED`, held by another consumer | No |
 | `413` | Payload over the size limit | No, send less |
@@ -320,22 +340,35 @@ All errors return a consistent shape:
 
 - Java 21
 - PostgreSQL 16
-- Maven
+- Maven (or the bundled `./mvnw`)
 - Node.js 20+
-- Docker + Docker Compose (optional — for full stack)
+- Docker + Docker Compose (optional: for the full stack, and required for the integration tests)
+- `openssl`, to generate keys (Git Bash on Windows ships with it)
 
-### Option A — Docker Compose (recommended)
+### Step 1: generate an admin key
+
+Every producer and consumer authenticates with an API key, and only an admin can create those keys. The broker reads the first admin key from the `MINIQUEUE_BOOTSTRAP_ADMIN_KEY` environment variable at startup. On first start it creates an admin client called `bootstrap-admin` with that key; set a different value later and restart, and the key is rotated.
+
+Generate one:
+```bash
+echo "mq_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
+```
+
+This prints something like `mq_q3ZxV0h...` (46 characters). Keep it somewhere safe and never commit it. The broker refuses to start if the variable is set to a value that doesn't start with `mq_` and have at least 32 characters after it. If the variable is not set at all, the broker still starts, but logs a warning, and nobody can register clients.
+
+### Option A: Docker Compose (recommended)
 
 ```bash
 git clone https://github.com/srivathsav01/MiniQueue.git
 cd MiniQueue
 ```
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (it is git-ignored):
 ```
 POSTGRES_PASSWORD=your_password
 SPRING_DATASOURCE_PASSWORD=your_password
 CORS_ALLOWED_ORIGINS=http://localhost:80
+MINIQUEUE_BOOTSTRAP_ADMIN_KEY=mq_paste_the_key_from_step_1
 ```
 
 Start everything:
@@ -343,52 +376,117 @@ Start everything:
 docker compose up --build
 ```
 
+The backend log should show `Bootstrap admin key installed (mq_xxxxxxxx...)`.
+
 | Service | URL |
 |---|---|
 | Dashboard | http://localhost |
+| REST API | http://localhost/api/v1/... (proxied to the backend by the dashboard's nginx) |
 | Swagger UI | http://localhost/swagger-ui/index.html |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
-### Option B — Manual Setup
+### Option B: Manual setup
 
-**Backend:**
-
-```bash
-cd backend
-```
-
-Create the database:
+**Database:**
 ```sql
 CREATE DATABASE miniqueue;
 ```
+Flyway creates all the tables on the first start.
 
-Configure `src/main/resources/application.yaml` with your database credentials, then:
+**Backend:** the backend is configured through environment variables, so no credentials go into `application.yaml`.
 
+Git Bash / macOS / Linux:
 ```bash
+cd backend
+export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/miniqueue
+export SPRING_DATASOURCE_USERNAME=postgres
+export SPRING_DATASOURCE_PASSWORD=your_password
+export MINIQUEUE_BOOTSTRAP_ADMIN_KEY=mq_paste_the_key_from_step_1
 ./mvnw spring-boot:run
 ```
 
-Backend starts on `http://localhost:8080`.
+PowerShell:
+```powershell
+cd backend
+$env:SPRING_DATASOURCE_PASSWORD = "your_password"
+$env:MINIQUEUE_BOOTSTRAP_ADMIN_KEY = "mq_paste_the_key_from_step_1"
+./mvnw spring-boot:run
+```
+
+IntelliJ: open **Run → Edit Configurations → MiniqueueApplication → Environment variables** and add them as `NAME=value` pairs separated by `;`.
+
+The backend starts on `http://localhost:8080`, and its log should show `Bootstrap admin key installed`.
 
 **Frontend:**
-
 ```bash
 cd ui
 npm install
 npm run dev
 ```
+The dashboard opens at `http://localhost:5173`. The Vite dev server proxies `/api` and `/ws` to `localhost:8080`.
 
-Dashboard opens at `http://localhost:5173`.
+### Step 2: register your first clients
+
+The examples use `B=http://localhost:8080`. With Docker Compose, use `B=http://localhost` instead.
+
+```bash
+B=http://localhost:8080
+ADMIN=mq_paste_the_key_from_step_1
+
+# A topic, and a queue bound to it
+curl -s -X POST $B/api/v1/topics -H "Content-Type: application/json" -d '{"name":"order.placed"}'
+curl -s -X POST $B/api/v1/queues -H "Content-Type: application/json" -d '{"name":"email-queue","topic_name":"order.placed"}'
+
+# A producer that may publish to order.placed, and a consumer that may consume email-queue.
+# Each response contains "api_key". It is shown only once: copy it now.
+curl -s -X POST $B/api/v1/clients -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
+  -d '{"name":"shop","scopes":["publish:order.placed"]}'
+curl -s -X POST $B/api/v1/clients -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json" \
+  -d '{"name":"mailer","scopes":["consume:email-queue"]}'
+```
+
+Then use the two keys:
+```bash
+SHOP=mq_key_from_the_shop_response
+MAILER=mq_key_from_the_mailer_response
+
+# Publish as the shop
+curl -s -X POST $B/api/v1/topics/order.placed/messages -H "Authorization: Bearer $SHOP" \
+  -H "Content-Type: application/json" -d '{"payload":"{\"orderId\":42}"}'
+
+# Consume as the mailer, then ack using the message_id from the response
+curl -s -X POST $B/api/v1/queues/email-queue/consume -H "Authorization: Bearer $MAILER"
+curl -s -X POST $B/api/v1/messages/<message_id>/ack -H "Authorization: Bearer $MAILER"
+```
+
+Lost a key? Run `POST /api/v1/clients/{name}/rotate` with the admin key. It returns a new key, and the old one stops working immediately.
+
+In Swagger UI, click **Authorize** and paste a key; every "Try it out" call then sends it.
 
 ### Running the tests
 
-The integration tests start their own throwaway PostgreSQL container, so they don't touch your local database. Docker (or a Docker-compatible runtime such as Rancher Desktop in `dockerd` mode) must be running.
+The backend integration tests start their own throwaway PostgreSQL container, so they never touch your local database, and they set their own admin key. Docker (or a Docker-compatible runtime such as Rancher Desktop in `dockerd` mode) must be running.
 
 ```bash
 cd backend
 ./mvnw test
 ```
+
+The SDK unit tests use in-process stub servers and need neither Docker nor a broker:
+```bash
+cd sdk
+./mvnw test
+```
+
+### Load test and live SDK checks
+
+These run against a broker you have already started. They register their own scoped clients, so they need the admin key:
+```bash
+ADMIN_KEY=mq_paste_the_key_from_step_1 ./load-test.sh
+```
+
+For `LiveBrokerCheck`, `LiveConsumerCheck` and `LiveStarterCheck` (in `sdk/`), set `MINIQUEUE_ADMIN_KEY` to the same key in each run configuration's environment variables, then run `main()`.
 
 ---
 

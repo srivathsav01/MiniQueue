@@ -47,6 +47,26 @@ public class MiniQueueException extends RuntimeException {
         }
     }
 
+    /**
+     * HTTP 401: the API key is missing, wrong or revoked. Not retryable: the same key will
+     * fail the same way. Check the configured key, or ask an admin to rotate it.
+     */
+    public static final class Unauthorized extends MiniQueueException {
+        Unauthorized(String message) {
+            super(message, 401, null);
+        }
+    }
+
+    /**
+     * HTTP 403: the key is valid but its scopes do not allow this, e.g. publishing to a topic
+     * it has no publish scope for. Not retryable: an admin has to grant the scope.
+     */
+    public static final class Forbidden extends MiniQueueException {
+        Forbidden(String message) {
+            super(message, 403, null);
+        }
+    }
+
     /** HTTP 404: the topic, queue or message does not exist. */
     public static final class NotFound extends MiniQueueException {
         NotFound(String message) {

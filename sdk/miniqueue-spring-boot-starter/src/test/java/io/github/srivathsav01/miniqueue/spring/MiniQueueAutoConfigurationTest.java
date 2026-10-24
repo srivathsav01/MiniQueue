@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.fail;
  */
 class MiniQueueAutoConfigurationTest {
 
+    private static final String API_KEY = "mq_test-key-0123456789abcdefghijklmnopqrstuv";
     private TinyBroker broker;
     private ApplicationContextRunner runner;
 
@@ -45,6 +46,7 @@ class MiniQueueAutoConfigurationTest {
                 .withConfiguration(AutoConfigurations.of(MiniQueueAutoConfiguration.class))
                 .withPropertyValues(
                         "miniqueue.client.base-url=" + broker.url(),
+                        "miniqueue.client.api-key=" + API_KEY,
                         "miniqueue.client.retry.max-attempts=1",
                         "miniqueue.client.consumer.min-poll-interval=10ms",
                         "miniqueue.client.consumer.max-poll-interval=50ms",
@@ -63,7 +65,7 @@ class MiniQueueAutoConfigurationTest {
 
     @Test
     void anApplicationDefinedClientReplacesTheAutoConfiguredOne() {
-        MiniQueueClient custom = MiniQueueClient.builder("http://localhost:9999").build();
+        MiniQueueClient custom = MiniQueueClient.builder("http://localhost:9999").apiKey(API_KEY).build();
 
         runner.withBean(MiniQueueClient.class, () -> custom)
                 .run(context -> assertThat(context.getBean(MiniQueueClient.class)).isSameAs(custom));
@@ -108,13 +110,32 @@ class MiniQueueAutoConfigurationTest {
     }
 
     @Test
-    void generatesAConsumerIdThatIsUniqueToThisInstance() {
+    void sendsTheApiKeyAndARandomInstanceIdByDefault() {
         runner.withUserConfiguration(PayloadListener.class).run(context -> {
-            waitUntil(() -> !broker.consumerIdsPolled.isEmpty());
+            waitUntil(() -> !broker.instancesPolled.isEmpty());
 
-            assertThat(broker.consumerIdsPolled.get(0))
-                    .startsWith("orders-service-")
-                    .hasSize("orders-service-".length() + 8);
+            assertThat(broker.authorizationsSeen).allMatch(("Bearer " + API_KEY)::equals);
+            assertThat(broker.instancesPolled.get(0)).matches("[0-9a-f]{8}");
+        });
+    }
+
+    @Test
+    void usesTheConfiguredInstanceId() {
+        runner.withPropertyValues("miniqueue.client.instance-id=pod-7")
+                .withUserConfiguration(PayloadListener.class)
+                .run(context -> {
+                    waitUntil(() -> !broker.instancesPolled.isEmpty());
+                    assertThat(broker.instancesPolled).containsOnly("pod-7");
+                });
+    }
+
+    @Test
+    void aMissingApiKeyFailsStartupNamingTheProperty() {
+        runner.withPropertyValues("miniqueue.client.api-key=").run(context -> {
+            assertThat(context).hasFailed();
+            assertThat(context.getStartupFailure())
+                    .rootCause()
+                    .hasMessageContaining("miniqueue.client.api-key");
         });
     }
 
@@ -209,7 +230,8 @@ class MiniQueueAutoConfigurationTest {
         final List<UUID> acked = new CopyOnWriteArrayList<>();
         final List<UUID> nacked = new CopyOnWriteArrayList<>();
         final List<String> queuesPolled = new CopyOnWriteArrayList<>();
-        final List<String> consumerIdsPolled = new CopyOnWriteArrayList<>();
+        final List<String> authorizationsSeen = new CopyOnWriteArrayList<>();
+        final List<String> instancesPolled = new CopyOnWriteArrayList<>();
         final AtomicInteger consumeCalls = new AtomicInteger();
 
         private final ConcurrentLinkedQueue<String> pending = new ConcurrentLinkedQueue<>();
@@ -233,7 +255,8 @@ class MiniQueueAutoConfigurationTest {
                 // "/api/v1/queues/{queue}/consume" -> {queue}
                 String[] parts = path.split("/");
                 queuesPolled.add(parts[parts.length - 2]);
-                consumerIdsPolled.add(bodyField(exchange, "consumer_id"));
+                authorizationsSeen.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
+                instancesPolled.add(String.valueOf(exchange.getRequestHeaders().getFirst("MiniQueue-Instance")));
                 String payload = pending.poll();
                 if (payload == null) {
                     exchange.sendResponseHeaders(204, -1);
@@ -269,11 +292,6 @@ class MiniQueueAutoConfigurationTest {
 
         void enqueue(String... payloads) {
             pending.addAll(List.of(payloads));
-        }
-
-        private String bodyField(HttpExchange exchange, String field) throws IOException {
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            return json.readTree(body).get(field).asText();
         }
 
         private static void reply(HttpExchange exchange, String body) throws IOException {
