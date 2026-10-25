@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useConfirmDialog } from "@/context/ConfirmDialogContext";
 import { useRefresh } from "@/context/RefreshContext";
 import ErrorDisplay from "@/page/ErrorPage";
+import { useAuth } from "@/context/AuthContext";
 
 function StatusCell({
     value,
@@ -64,6 +65,8 @@ export default function DeadLetterQueueStats() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [replayingId, setReplayingId] = useState<string | null>(null);
+    // Viewers see the dead messages but not the Replay button (the server would answer 403 anyway).
+    const { isAdmin } = useAuth();
     const { openConfirmDialog } = useConfirmDialog();
     const { refreshKey, triggerRefresh } = useRefresh();
     const replayMessage = async (messageId: string) => {
@@ -131,9 +134,11 @@ export default function DeadLetterQueueStats() {
                             <TableHead className="font-semibold text-xs uppercase tracking-wider ">
                                 unacked At
                             </TableHead>
-                            <TableHead className="font-semibold text-xs uppercase tracking-wider ">
-                                Replay Message
-                            </TableHead>
+                            {isAdmin && (
+                                <TableHead className="font-semibold text-xs uppercase tracking-wider ">
+                                    Replay Message
+                                </TableHead>
+                            )}
                         </TableRow>
                     </TableHeader>
 
@@ -177,18 +182,20 @@ export default function DeadLetterQueueStats() {
                                             })
                                             : "—"}
                                     </TableCell>
-                                    <TableCell className="text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                                        <Button size="sm" variant="ghost" className="flex items-center gap-2"
-                                            onClick={() => openConfirmDialog({
-                                                title: "Replay this message?",
-                                                description: `Message ${msg.messageId.substring(0, 10)}... will be reset to PENDING and requeued.`,
-                                                confirmLabel: "Replay",
-                                                onConfirm: () => replayMessage(msg.messageId),
-                                            })}
-                                            disabled={replayingId === msg.messageId}>
-                                            <Repeat2 className={`size-4 ${replayingId === msg.messageId ? "animate-spin" : ""}`} />
-                                        </Button>
-                                    </TableCell>
+                                    {isAdmin && (
+                                        <TableCell className="text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                                            <Button size="sm" variant="ghost" className="flex items-center gap-2"
+                                                onClick={() => openConfirmDialog({
+                                                    title: "Replay this message?",
+                                                    description: `Message ${msg.messageId.substring(0, 10)}... will be reset to PENDING and requeued.`,
+                                                    confirmLabel: "Replay",
+                                                    onConfirm: () => replayMessage(msg.messageId),
+                                                })}
+                                                disabled={replayingId === msg.messageId}>
+                                                <Repeat2 className={`size-4 ${replayingId === msg.messageId ? "animate-spin" : ""}`} />
+                                            </Button>
+                                        </TableCell>
+                                    )}
                                 </TableRow>
                             ))
                         )}

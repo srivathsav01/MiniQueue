@@ -18,5 +18,4 @@ public interface ClientService {
 
     Optional<ClientPrincipal> authenticate(String apiKey);
 
-    void ensureBootstrapAdmin(String apiKey);
 }

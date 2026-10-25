@@ -19,7 +19,9 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/miniqueue
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-      MINIQUEUE_BOOTSTRAP_ADMIN_KEY: ${MINIQUEUE_BOOTSTRAP_ADMIN_KEY}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      MINIQUEUE_ADMINS: ${MINIQUEUE_ADMINS}
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,6 +36,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     volumes:
+      - ./monitoring/miniqueue-api-key:/etc/prometheus/miniqueue-api-key:ro
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
     ports:

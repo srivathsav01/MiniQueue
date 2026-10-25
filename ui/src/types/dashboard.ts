@@ -60,3 +60,23 @@ export interface QueueMessageResponse {
   publishedAt: string;
   unackedAt: string | null;
 }
+
+/** Who is signed in. token and expires_at only come back from the sign-in exchange. */
+export interface SessionInfo {
+    token?: string;
+    username: string;
+    scopes: string[];
+    expires_at?: string;
+}
+
+/** A registered application (producer or consumer) and its API key metadata. */
+export interface BrokerClient {
+    id: string;
+    name: string;
+    scopes: string[];
+    key_prefix: string;
+    /** Only present right after create or rotate. */
+    api_key?: string;
+    created_at: string;
+    last_used_at?: string;
+}

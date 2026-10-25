@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import ErrorDisplay from "./ErrorPage";
+import { useAuth } from "@/context/AuthContext";
 
 function SkeletonCards() {
     return (
@@ -44,14 +45,16 @@ function SkeletonCards() {
     );
 }
 
-function EmptyState({ onOpen }: { onOpen: () => void }) {
+function EmptyState({ onOpen, canCreate }: { onOpen: () => void; canCreate: boolean }) {
     return (
         <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
             <span className="text-3xl">📭</span>
             <p className="text-sm">No topics yet.</p>
-            <Button size="sm" onClick={onOpen}>
-                <Plus className="size-4 mr-1" /> Create your first topic
-            </Button>
+            {canCreate && (
+                <Button size="sm" onClick={onOpen}>
+                    <Plus className="size-4 mr-1" /> Create your first topic
+                </Button>
+            )}
         </div>
     );
 }
@@ -84,6 +87,8 @@ export default function ManagePage() {
     const [creating, setCreating] = useState(false);
     const [payload, setPayload] = useState("");
     const [publishing, setPublishing] = useState(false);
+    // Viewers see topics but not the buttons that change anything (the server would answer 403 anyway).
+    const { isAdmin } = useAuth();
 
     const fetchTopics = () => {
         setLoading(true);
@@ -178,11 +183,13 @@ export default function ManagePage() {
             <div className="md:flex items-center justify-between">
                 <div>
                     <h1 className="text-base font-semibold">Topics</h1>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                        Manage broker topics and their bindings
-                    </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                        {isAdmin
+                            ? "Manage broker topics and their bindings"
+                            : "Read-only view. Only admins can create topics, queues and messages."}
+                        </p>
                 </div>
-                {topics.length > 0 && (
+                {isAdmin && topics.length > 0 && (
                     <div className="flex items-center gap-2 mt-3 md:mt-0">
                         <Button size="sm" onClick={() => setTopicDialogOpen(true)}>
                             <Plus className="size-4 mr-1" /> New Topic
@@ -201,7 +208,7 @@ export default function ManagePage() {
             {loading ? (
                 <SkeletonCards />
             ) : topics.length === 0 ? (
-                <EmptyState onOpen={() => setTopicDialogOpen(true)} />
+                <EmptyState onOpen={() => setTopicDialogOpen(true)} canCreate={isAdmin} />
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {topics.map((topic) => (

@@ -14,8 +14,17 @@ miniqueue:
   limits:
     max-payload-bytes: 262144 #256 KB
   security:
-    # The first admin key. Generate one with: echo "mq_$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=')"
-    bootstrap-admin-key: ${MINIQUEUE_BOOTSTRAP_ADMIN_KEY:}
+    session-ttl: 8h
+    # Where the dashboard lives. Sign-in always redirects here and nowhere else.
+    dashboard-url: ${MINIQUEUE_DASHBOARD_URL:http://localhost:5173}
+    # Comma-separated GitHub usernames that get admin, e.g. srivathsav01
+    admins: ${MINIQUEUE_ADMINS:}
+    # true: any other GitHub user may sign in read-only. false: only admins may sign in.
+    public-viewer: ${MINIQUEUE_PUBLIC_VIEWER:true}
+    github:
+      client-id: ${GITHUB_CLIENT_ID:}
+      client-secret: ${GITHUB_CLIENT_SECRET:}
+      callback-url: ${GITHUB_CALLBACK_URL:http://localhost:8080/api/v1/auth/github/callback}
 
 spring:
   application:
@@ -34,10 +43,6 @@ spring:
         format_sql: true
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     open-in-view: false
-  api-docs:
-    enabled: true
-  swagger-ui:
-    enabled: true
   autoconfigure:
     exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
 
@@ -46,7 +51,3 @@ management:
     web:
       exposure:
         include: prometheus,health
-  metrics:
-    export:
-      prometheus:
-        enabled: true

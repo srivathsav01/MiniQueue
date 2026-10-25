@@ -13,9 +13,8 @@ import java.util.Map;
  * Admin-side setup for the live checks: topics, queues and API keys. The SDK only covers
  * what producers and consumers do, so this uses raw HTTP, the way an operator would.
  *
- * Needs the broker's admin key in the MINIQUEUE_ADMIN_KEY environment variable (the same
- * value as the backend's MINIQUEUE_BOOTSTRAP_ADMIN_KEY). In IntelliJ: Run, Edit
- * Configurations, the check's run configuration, Environment variables.
+ * Needs the broker's admin key in the MINIQUEUE_ADMIN_KEY environment variable (an admin-scoped API key created from the dashboard).
+ * In IntelliJ: Run, Edit Configurations, the check's run configuration, Environment variables.
  */
 final class LiveSetup {
 
@@ -34,8 +33,8 @@ final class LiveSetup {
     }
 
     static void createTopicAndQueue(String baseUrl, String topic, String queue) throws Exception {
-        post(baseUrl + "/api/v1/topics", null, Map.of("name", topic));
-        post(baseUrl + "/api/v1/queues", null, Map.of("name", queue, "topic_name", topic));
+        post(baseUrl + "/api/v1/topics", adminKey(), Map.of("name", topic));
+        post(baseUrl + "/api/v1/queues", adminKey(), Map.of("name", queue, "topic_name", topic));
     }
 
     /** Registers a client with the given scopes and returns its API key (shown only this once). */

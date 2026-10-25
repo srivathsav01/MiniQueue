@@ -41,6 +41,11 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<Response<String>> handleUnauthorized(UnauthorizedException ex) {
+        return error(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
     @ExceptionHandler(CustomException.class)
     public ResponseEntity<Response<String>> handleCustomException(CustomException ex) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage());

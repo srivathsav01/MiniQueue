@@ -1,6 +1,8 @@
 package com.sri.miniqueue.security;
 
 import com.sri.miniqueue.service.ClientService;
+import com.sri.miniqueue.service.DashboardSessionService;
+import com.sri.miniqueue.utils.ApiKeys;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,9 +20,12 @@ import java.io.IOException;
 import java.util.Optional;
 
 /**
- * Reads "Authorization: Bearer mq_..." and, if the key is valid, records the client as the
- * authenticated caller for this request. It does not decide what the caller may do; the
- * rules in SecurityConfig do that.
+ * Works out who is calling, from one of three credentials:
+ *   Authorization: Bearer mq_...    an API key (programs)
+ *   Authorization: Bearer mqs_...   a dashboard session (people signed in with GitHub)
+ *   /ws/...?ticket=wst_...          a one-time WebSocket ticket (browsers opening a socket)
+ * All three end as the same ClientPrincipal with scopes, so the rules in SecurityConfig never
+ * care how someone proved who they are, only what they may do.
  *
  * Deliberately NOT a @Component: Spring Boot registers every Filter bean as a plain servlet
  * filter too, so it would run twice, once outside Spring Security.
@@ -30,37 +35,57 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER = "Bearer ";
 
     private final ClientService clientService;
+    private final DashboardSessionService sessionService;
+    private final OneTimeCodes<ClientPrincipal> webSocketTickets;
     private final AuthenticationEntryPoint entryPoint;
 
-    public ApiKeyAuthenticationFilter(ClientService clientService, AuthenticationEntryPoint entryPoint) {
+    public ApiKeyAuthenticationFilter(ClientService clientService, DashboardSessionService sessionService,
+                                      OneTimeCodes<ClientPrincipal> webSocketTickets, AuthenticationEntryPoint entryPoint) {
         this.clientService = clientService;
+        this.sessionService = sessionService;
+        this.webSocketTickets = webSocketTickets;
         this.entryPoint = entryPoint;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (header == null || !header.regionMatches(true, 0, BEARER, 0, BEARER.length())) {
-            // No key: carry on as anonymous. Open endpoints still work; protected ones answer 401.
+        Optional<Optional<ClientPrincipal>> attempt = credentialFrom(request);
+        if (attempt.isEmpty()) {
+            // No credential at all: carry on as anonymous. Open endpoints still work; protected ones answer 401.
             chain.doFilter(request, response);
             return;
         }
 
-        Optional<ClientPrincipal> client = clientService.authenticate(header.substring(BEARER.length()).trim());
-        if (client.isEmpty()) {
-            // A key was sent but is wrong. Fail loudly, even on open endpoints, so a typo or a
-            // revoked key in a config file shows up at once instead of half-working.
-            entryPoint.commence(request, response, new BadCredentialsException("Invalid API key"));
+        Optional<ClientPrincipal> principal = attempt.get();
+        if (principal.isEmpty()) {
+            // A credential was sent but is wrong, expired or revoked: fail loudly, even on open endpoints.
+            entryPoint.commence(request, response, new BadCredentialsException("Invalid credentials"));
             return;
         }
 
-        ClientPrincipal principal = client.get();
-        var authorities = principal.scopes().stream().map(SimpleGrantedAuthority::new).toList();
+        ClientPrincipal caller = principal.get();
+        var authorities = caller.scopes().stream().map(SimpleGrantedAuthority::new).toList();
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(new PreAuthenticatedAuthenticationToken(principal, null, authorities));
+        context.setAuthentication(new PreAuthenticatedAuthenticationToken(caller, null, authorities));
         SecurityContextHolder.setContext(context);
 
         chain.doFilter(request, response);
+    }
+
+    /** Outer empty: no credential was sent. Inner empty: one was sent, but it is not valid. */
+    private Optional<Optional<ClientPrincipal>> credentialFrom(HttpServletRequest request) {
+        String header = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (header != null && header.regionMatches(true, 0, BEARER, 0, BEARER.length())) {
+            String credential = header.substring(BEARER.length()).trim();
+            return Optional.of(credential.startsWith(ApiKeys.SESSION_PREFIX)
+                    ? sessionService.authenticate(credential)
+                    : clientService.authenticate(credential));
+        }
+        String ticket = request.getParameter("ticket");
+        if (ticket != null && request.getRequestURI().startsWith("/ws/")) {
+            return Optional.of(webSocketTickets.redeem(ticket));
+        }
+        return Optional.empty();
     }
 }

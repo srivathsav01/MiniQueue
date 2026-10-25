@@ -83,8 +83,9 @@ public class LiveStarterCheck {
     }
 
     private static void createTopicAndQueue(String baseUrl, String topic, String queue) throws Exception {
-        post(baseUrl + "/api/v1/topics", null, "{\"name\":\"" + topic + "\"}");
-        post(baseUrl + "/api/v1/queues", null, "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
+        String adminKey = System.getenv("MINIQUEUE_ADMIN_KEY");
+        post(baseUrl + "/api/v1/topics", adminKey, "{\"name\":\"" + topic + "\"}");
+        post(baseUrl + "/api/v1/queues", adminKey, "{\"name\":\"" + queue + "\",\"topic_name\":\"" + topic + "\"}");
     }
 
     /** Registers a client with the admin key from MINIQUEUE_ADMIN_KEY and returns its new API key. */

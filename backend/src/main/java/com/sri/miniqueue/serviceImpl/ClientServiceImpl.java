@@ -27,8 +27,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ClientServiceImpl implements ClientService {
 
-    static final String BOOTSTRAP_ADMIN = "bootstrap-admin";
-
     // last_used_at answers "is this key still in use?", so minute precision is plenty,
     // and it avoids a database write on every single request.
     private static final Duration TOUCH_INTERVAL = Duration.ofMinutes(1);
@@ -96,28 +94,6 @@ public class ClientServiceImpl implements ClientService {
             }
             return new ClientPrincipal(client.getId(), client.getName(), Set.of(client.getScopes().split(" ")));
         });
-    }
-
-    @Override
-    @Transactional
-    public void ensureBootstrapAdmin(String apiKey) {
-        if (!ApiKeys.looksLikeKey(apiKey)) {
-            // Fail startup: a weak or mistyped admin key is worse than no admin key.
-            throw new IllegalStateException("MINIQUEUE_BOOTSTRAP_ADMIN_KEY must start with '"
-                    + ApiKeys.PREFIX + "' and have at least 32 characters after it");
-        }
-        Client admin = clientRepository.findByNameAndRevokedAtIsNull(BOOTSTRAP_ADMIN).orElseGet(() -> {
-            Client client = new Client();
-            client.setName(BOOTSTRAP_ADMIN);
-            client.setScopes(Scopes.ADMIN);
-            client.setCreatedAt(LocalDateTime.now());
-            return client;
-        });
-        if (!ApiKeys.hash(apiKey).equals(admin.getKeyHash())) {
-            setKey(admin, apiKey);
-            clientRepository.save(admin);
-            log.info("Bootstrap admin key installed ({}...)", admin.getKeyPrefix());
-        }
     }
 
     private Client findActive(String rawName) {

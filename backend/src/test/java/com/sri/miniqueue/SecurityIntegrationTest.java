@@ -1,6 +1,7 @@
 package com.sri.miniqueue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sri.miniqueue.service.ClientService;
 import com.sri.miniqueue.service.MessageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,12 +31,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Sends real HTTP requests through the full Spring Security filter chain (MockMvc), against
  * a real Postgres, to prove who may do what.
  */
-@SpringBootTest(properties = "miniqueue.security.bootstrap-admin-key=" + SecurityIntegrationTest.ADMIN_KEY)
+@SpringBootTest()
 @AutoConfigureMockMvc
 @Testcontainers
 class SecurityIntegrationTest {
 
-    static final String ADMIN_KEY = "mq_test-admin-key-0123456789abcdefghijklmnop";
+    @Autowired
+    private ClientService clientService;
+
+    private String adminKey;
 
     @Container
     @ServiceConnection
@@ -61,6 +65,7 @@ class SecurityIntegrationTest {
         queue = "queue-" + suffix;
         messageService.createTopic(topic);
         messageService.createQueue(queue, topic);
+        adminKey = clientService.createClient("test-admin-" + suffix, List.of("admin")).getApiKey();
     }
 
     @Test
@@ -121,7 +126,7 @@ class SecurityIntegrationTest {
         String oldKey = createClient(name, "publish:" + topic);
         publish(oldKey).andExpect(status().isOk());
 
-        String rotated = mvc.perform(post("/api/v1/clients/" + name + "/rotate").header(AUTHORIZATION, "Bearer " + ADMIN_KEY))
+        String rotated = mvc.perform(post("/api/v1/clients/" + name + "/rotate").header(AUTHORIZATION, "Bearer " + adminKey))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         String newKey = json.readTree(rotated).path("response_body").path("api_key").asText();
@@ -129,7 +134,7 @@ class SecurityIntegrationTest {
         publish(oldKey).andExpect(status().isUnauthorized());
         publish(newKey).andExpect(status().isOk());
 
-        mvc.perform(delete("/api/v1/clients/" + name).header(AUTHORIZATION, "Bearer " + ADMIN_KEY))
+        mvc.perform(delete("/api/v1/clients/" + name).header(AUTHORIZATION, "Bearer " + adminKey))
                 .andExpect(status().isOk());
         publish(newKey).andExpect(status().isUnauthorized());
     }
@@ -137,7 +142,7 @@ class SecurityIntegrationTest {
     private String createClient(String name, String... scopes) throws Exception {
         String request = json.writeValueAsString(Map.of("name", name, "scopes", List.of(scopes)));
         String response = mvc.perform(post("/api/v1/clients")
-                        .header(AUTHORIZATION, "Bearer " + ADMIN_KEY)
+                        .header(AUTHORIZATION, "Bearer " + adminKey)
                         .contentType(APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isOk())

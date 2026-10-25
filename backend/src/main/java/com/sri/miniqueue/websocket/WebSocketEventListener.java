@@ -28,11 +28,11 @@ public class WebSocketEventListener {
         Optional< WebSocketSession> session = webSocketSessionRegistry.getNextSession(event.getQueueName());
         if(session.isPresent()){
             try{
-                String payload = event.getMessage().getPayload();
-                String preview = payload.length()>25? payload.substring(0,25)+"..." : payload;
-                Map<String,String> notification = Map.of(
+                // Only the id: payloads may be confidential, and the consumer fetches the message
+                // through the authenticated consume call anyway.
+                Map<String, String> notification = Map.of(
                         "queue", event.getQueueName(),
-                        "event", preview
+                        "message_id", event.getMessage().getMessageId().toString()
                 );
                 String json = objectMapper.writeValueAsString(notification);
                 session.get().sendMessage(new TextMessage(json));

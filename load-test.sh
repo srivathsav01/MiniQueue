@@ -18,9 +18,11 @@ QUEUE="load-queue-$RUN"
 
 echo "Creating topic '$TOPIC' and queue '$QUEUE' on $BASE"
 curl -sf -o /dev/null -X POST "$BASE/api/v1/topics" \
+  -H "Authorization: Bearer $ADMIN_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$TOPIC\"}"
 curl -sf -o /dev/null -X POST "$BASE/api/v1/queues" \
+  -H "Authorization: Bearer $ADMIN_KEY" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$QUEUE\",\"topic_name\":\"$TOPIC\"}"
 

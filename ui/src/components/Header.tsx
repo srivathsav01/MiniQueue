@@ -1,12 +1,18 @@
 import { ROUTE_CONSTANTS, Routes } from "@/lib/routes";
-import { Menu, Moon, Ship, Sun, X } from "lucide-react";
+import { LogOut, Menu, Moon, Ship, Sun, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/context/AuthContext";
 
 function Header() {
     const navigate = useNavigate();
     const {pathname} = useLocation();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+    const { state, isAdmin, signOut } = useAuth();
+    const username = state.status === "signedIn" ? state.username : "";
+    const visibleRoutes = Routes.filter((route) => !route.adminOnly || isAdmin);
 
     return (
     <div className="item-center flex justify-center">
@@ -15,9 +21,9 @@ function Header() {
                 <Ship size={30} strokeWidth={1} className="ml-1.5"/>
                 MiniQueue
             </span>
-            <div className="nav w-64 hidden md:block">
+            <div className="nav hidden md:block">
                     <ul className="flex flex-col md:flex-row gap-6 text-lg font-extralight">
-                        {Routes.map(({ path, label }) => {
+                        {visibleRoutes.map(({ path, label }) => {
                             const isActive = path === "/home" || path === "/"
                                 ? pathname === "/" || pathname === "/home"
                                 : pathname === path;
@@ -34,7 +40,17 @@ function Header() {
                         })}
                     </ul>
                 </div>
-            <div className="actions flex items-center justify-end w-1/5">
+                        <div className="actions flex items-center justify-end gap-2">
+                <span className="hidden md:flex items-center gap-1.5 text-sm font-extralight">
+                    {username}
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                        {isAdmin ? "admin" : "read-only"}
+                    </Badge>
+                </span>
+                <button className="text-textprimary cursor-pointer ml-2" title="Sign out"
+                    onClick={() => { void signOut(); }}>
+                    <LogOut size={20} />
+                </button>
                 <button className="md:hidden text-textprimary cursor-pointer ml-2" onClick={()=>{setIsMenuOpen(!isMenuOpen)}}>
                     {isMenuOpen ? <X size={20} /> : <Menu size={20} />}
                 </button>
@@ -46,7 +62,7 @@ function Header() {
             {isMenuOpen && (
                 <div className={`mobile-nav absolute top-16 right-0 w-64 bg-card text-textprimary p-4 rounded-lg shadow-lg transition-transform duration-300 z-20 ${isMenuOpen ? "translate-x-0" : "translate-x-full"} md:hidden`}>
                     <ul className="flex flex-col gap-4 text-lg font-extralight">
-                        {Routes.map(({ path, label }) => {
+                        {visibleRoutes.map(({ path, label }) => {
                             const isActive = path === "/home" || path === "/"
                                 ? pathname === "/" || pathname === "/home"
                                 : pathname === path;

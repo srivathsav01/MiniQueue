@@ -2,6 +2,7 @@ package com.sri.miniqueue.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sri.miniqueue.service.ClientService;
+import com.sri.miniqueue.service.DashboardSessionService;
 import com.sri.miniqueue.utils.Scopes;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +21,7 @@ import org.springframework.security.web.access.intercept.RequestAuthorizationCon
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 
 import java.util.Locale;
+import java.util.function.Function;
 
 @Configuration
 @EnableWebSecurity
@@ -28,6 +30,10 @@ public class SecurityConfig {
 
     private final ClientService clientService;
 
+    private final DashboardSessionService sessionService;
+
+    private final OneTimeCodes<ClientPrincipal> webSocketTickets;
+
     private final ObjectMapper objectMapper;
 
     @Bean
@@ -35,43 +41,70 @@ public class SecurityConfig {
         JsonSecurityErrors errors = new JsonSecurityErrors(objectMapper);
 
         http
-                // CSRF tricks a browser into sending its cookies to another site. API keys travel
-                // in a header that a malicious page cannot make the browser add, so CSRF does not
-                // apply here. Step 4 adds a cookie session for the admin and revisits this.
+                // CSRF works by making a browser send its cookies to another site. Every credential
+                // here is sent explicitly by the caller (a header or a one-time code), never as a
+                // cookie. The only cookie, the OAuth state, is itself the CSRF protection for sign-in.
                 .csrf(AbstractHttpConfigurer::disable)
-                // Reuse CorsConfig, and let browser preflight (OPTIONS) requests through unauthenticated.
                 .cors(Customizer.withDefaults())
-                // Every request carries its own key: never create an HTTP session.
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .exceptionHandling(e -> e.authenticationEntryPoint(errors).accessDeniedHandler(errors))
-                .addFilterBefore(new ApiKeyAuthenticationFilter(clientService, errors), AnonymousAuthenticationFilter.class)
+                .addFilterBefore(new ApiKeyAuthenticationFilter(clientService, sessionService, webSocketTickets, errors),
+                        AnonymousAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
+                        // Open to everyone
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/v1/clients", "/api/v1/clients/**").hasAuthority(Scopes.ADMIN)
-                        .requestMatchers(HttpMethod.POST, "/api/v1/topics/{topic}/messages").access(scope(Scopes.PUBLISH, "topic"))
-                        .requestMatchers(HttpMethod.POST, "/api/v1/queues/{queue}/consume").access(scope(Scopes.CONSUME, "queue"))
-                        // Any valid key. The service then checks that this caller holds the message.
+                        .requestMatchers("/error").permitAll() // Spring's error forward; denying it turns real errors into 401
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/github/login", "/api/v1/auth/github/callback").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/exchange").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // Public on purpose: the source is public, so hiding the docs hides nothing
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+
+                        // Anyone signed in (or any API key): who am I, sign out, WebSocket ticket
+                        .requestMatchers("/api/v1/auth/**").authenticated()
+
+                        // Producers and consumers
+                        .requestMatchers(HttpMethod.POST, "/api/v1/topics/{topic}/messages")
+                        .access(scope(Scopes.PUBLISH, ctx -> ctx.getVariables().get("topic")))
+                        .requestMatchers(HttpMethod.POST, "/api/v1/queues/{queue}/consume")
+                        .access(scope(Scopes.CONSUME, ctx -> ctx.getVariables().get("queue")))
                         .requestMatchers(HttpMethod.POST, "/api/v1/messages/*/ack", "/api/v1/messages/*/nack").authenticated()
-                        // Topic/queue management, dashboard, Swagger, actuator and /ws stay open
-                        // until Step 4 puts them behind the admin login.
-                        .anyRequest().permitAll());
+                        .requestMatchers("/ws/consume")
+                        .access(scope(Scopes.CONSUME, ctx -> ctx.getRequest().getParameter("queue")))
+
+                        // Reading the dashboard: view or admin
+                        .requestMatchers(HttpMethod.GET, "/api/v1/topics", "/api/v1/queues",
+                                "/api/v1/queues/*/messages", "/api/v1/dashboard/**").hasAnyAuthority(Scopes.VIEW, Scopes.ADMIN)
+                        .requestMatchers("/ws/monitor").hasAnyAuthority(Scopes.VIEW, Scopes.ADMIN)
+
+                        // Monitoring
+                        .requestMatchers("/actuator/prometheus").hasAnyAuthority(Scopes.METRICS, Scopes.ADMIN)
+
+                        // Everything else in the API changes state: admin only
+                        .requestMatchers("/api/v1/**").hasAuthority(Scopes.ADMIN)
+
+                        // Deny by default: a path nobody listed above is refused, not silently open
+                        .anyRequest().denyAll());
 
         return http.build();
     }
 
-    /** Allows the request if the caller's scopes cover this action on the topic or queue named in the URL. */
-    private static AuthorizationManager<RequestAuthorizationContext> scope(String action, String pathVariable) {
+    /** Allows the request if the caller's scopes cover this action on the topic or queue nameOf extracts. */
+    private static AuthorizationManager<RequestAuthorizationContext> scope(
+            String action, Function<RequestAuthorizationContext, String> nameOf) {
         return (authentication, context) -> {
             Authentication auth = authentication.get();
             if (auth == null || !(auth.getPrincipal() instanceof ClientPrincipal client)) {
                 return new AuthorizationDecision(false); // anonymous: Spring turns this into 401
             }
-            // Names are stored lowercase, so "Orders" in the URL must match "publish:orders".
-            String name = context.getVariables().getOrDefault(pathVariable, "").toLowerCase(Locale.ROOT);
-            return new AuthorizationDecision(Scopes.allows(client.scopes(), action, name));
+            String name = nameOf.apply(context);
+            if (name == null || name.isBlank()) {
+                return new AuthorizationDecision(false);
+            }
+            return new AuthorizationDecision(Scopes.allows(client.scopes(), action, name.toLowerCase(Locale.ROOT)));
         };
     }
 }
