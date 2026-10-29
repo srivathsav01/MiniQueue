@@ -10,9 +10,13 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -40,6 +44,7 @@ class MiniQueueClientTest {
     private volatile String sentBody;
     private volatile String sentAuthorization;
     private volatile String sentInstance;
+    private volatile String sentIdempotencyKey;
 
     @BeforeEach
     void startStubBroker() throws IOException {
@@ -51,6 +56,7 @@ class MiniQueueClientTest {
             sentBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             sentAuthorization = exchange.getRequestHeaders().getFirst("Authorization");
             sentInstance = exchange.getRequestHeaders().getFirst("MiniQueue-Instance");
+            sentIdempotencyKey = exchange.getRequestHeaders().getFirst("Idempotency-Key");
 
             byte[] bytes = replyBody == null ? new byte[0] : replyBody.getBytes(StandardCharsets.UTF_8);
             if (bytes.length == 0) {
@@ -262,5 +268,65 @@ class MiniQueueClientTest {
 
         assertEquals(403, e.statusCode());
         assertFalse(e.isRetryable());
+    }
+
+    @Test
+    void everyPublishSendsItsOwnIdempotencyKey() {
+        client.publish("order.placed", "{}");
+        String first = sentIdempotencyKey;
+        client.publish("order.placed", "{}");
+
+        assertNotNull(first);
+        UUID.fromString(first); // a random UUID
+        assertNotEquals(first, sentIdempotencyKey, "two publishes are two different messages");
+    }
+
+    @Test
+    void aCallerChosenKeyIsSentAsGiven() {
+        client.publish("order.placed", "{}", "order-42");
+        assertEquals("order-42", sentIdempotencyKey);
+    }
+
+    @Test
+    void publishReturnsTheBrokersMessageIds() {
+        UUID id = UUID.randomUUID();
+        replyBody = "{\"status\":200,\"response_body\":{\"message_ids\":[\"" + id + "\"],\"duplicate\":true}}";
+
+        PublishResult result = client.publish("order.placed", "{}");
+
+        assertEquals(List.of(id), result.messageIds());
+        assertTrue(result.duplicate());
+    }
+
+    @Test
+    void aRetriedPublishReusesItsKey() throws IOException {
+        // A broker that fails the first attempt, then succeeds, recording each attempt's key.
+        List<String> keys = new CopyOnWriteArrayList<>();
+        AtomicInteger attempts = new AtomicInteger();
+        HttpServer flaky = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        flaky.createContext("/", exchange -> {
+            keys.add(exchange.getRequestHeaders().getFirst("Idempotency-Key"));
+            exchange.getRequestBody().readAllBytes();
+            int status = attempts.getAndIncrement() == 0 ? 503 : 200;
+            byte[] body = "{\"status\":200,\"response_body\":{\"message_ids\":[],\"duplicate\":false}}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        flaky.start();
+        try {
+            MiniQueueClient retrying = MiniQueueClient.builder("http://127.0.0.1:" + flaky.getAddress().getPort())
+                    .apiKey(API_KEY)
+                    .retryPolicy(RetryPolicy.of(3, Duration.ofMillis(1), Duration.ofMillis(5)))
+                    .build();
+
+            retrying.publish("order.placed", "{}");
+
+            assertEquals(2, keys.size(), "one failure, one retry");
+            assertEquals(keys.get(0), keys.get(1), "the retry must carry the same key, or it would store a copy");
+        } finally {
+            flaky.stop(0);
+        }
     }
 }

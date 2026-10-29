@@ -29,6 +29,9 @@ miniqueue:
       client-id: ${GITHUB_CLIENT_ID:}
       client-secret: ${GITHUB_CLIENT_SECRET:}
       callback-url: ${GITHUB_CALLBACK_URL:http://localhost:8080/api/v1/auth/github/callback}
+  idempotency:
+    # How long a publish key is remembered. A retry later than this would store a new copy.
+    retention: 24h
 
 spring:
   application:

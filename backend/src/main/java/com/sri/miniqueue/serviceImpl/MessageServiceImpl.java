@@ -1,9 +1,6 @@
 package com.sri.miniqueue.serviceImpl;
 
-import com.sri.miniqueue.dto.ConsumeResponse;
-import com.sri.miniqueue.dto.MessageResponse;
-import com.sri.miniqueue.dto.QueueResponse;
-import com.sri.miniqueue.dto.TopicResponse;
+import com.sri.miniqueue.dto.*;
 import com.sri.miniqueue.entity.Message;
 import com.sri.miniqueue.entity.Queue;
 import com.sri.miniqueue.entity.Topic;
@@ -16,10 +13,12 @@ import com.sri.miniqueue.mapper.QueueMapper;
 import com.sri.miniqueue.mapper.TopicMapper;
 import com.sri.miniqueue.metrics.BrokerMetrics;
 import com.sri.miniqueue.repository.MessageRepository;
+import com.sri.miniqueue.repository.PublishRequestRepository;
 import com.sri.miniqueue.repository.QueueRepository;
 import com.sri.miniqueue.repository.TopicRepository;
 import com.sri.miniqueue.service.MessageService;
 import com.sri.miniqueue.to.MessageStatus;
+import com.sri.miniqueue.utils.ApiKeys;
 import com.sri.miniqueue.utils.Names;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @RequiredArgsConstructor
@@ -62,6 +62,11 @@ public class MessageServiceImpl implements MessageService {
 
     @Value("${miniqueue.limits.max-payload-bytes:262144}")
     private int maxPayloadBytes;
+
+    private final PublishRequestRepository publishRequests;
+
+    // Printable and header-safe: UUIDs, order ids ("order-42"), "invoice:2026:17"...
+    private static final Pattern IDEMPOTENCY_KEY = Pattern.compile("[A-Za-z0-9._:-]{1,200}");
 
     @Override
     @Transactional
@@ -113,7 +118,7 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     @Transactional
-    public void publishMessage(String rawTopicName, String payload) throws CustomException {
+    public PublishResponse publishMessage(String rawTopicName, String payload, UUID publisherId, String idempotencyKey) {
         String topicName = Names.normalize(rawTopicName, "Topic");
         if (payload == null) {
             throw new CustomException("payload is required");
@@ -123,30 +128,67 @@ public class MessageServiceImpl implements MessageService {
         if (size > maxPayloadBytes) {
             throw new PayloadTooLargeException("Payload is " + size + " bytes; the limit is " + maxPayloadBytes);
         }
-        Optional<Topic> topic = this.topicRepository.findTopicByName(rawTopicName.toLowerCase());
-        if(topic.isEmpty()){
-            throw new ResourceNotFoundException("No Topic found with the name "+ rawTopicName);
+
+        if (idempotencyKey != null) {
+            if (publisherId == null) {
+                throw new IllegalArgumentException("An idempotent publish needs the publisher's id");
+            }
+            if (!IDEMPOTENCY_KEY.matcher(idempotencyKey).matches()) {
+                throw new CustomException("Idempotency-Key must be 1 to 200 characters from A-Z, a-z, 0-9, '.', '_', ':' and '-'");
+            }
+            // Topic names cannot contain a newline, so this pairing can never be ambiguous.
+            String requestHash = ApiKeys.hash(topicName + "\n" + payload);
+            // The claim is the first write in this transaction. If anything below fails (unknown
+            // topic, no queues), the rollback releases the key too, so a corrected retry still works.
+            if (!publishRequests.claim(publisherId, idempotencyKey, requestHash)) {
+                return replayEarlierPublish(publisherId, idempotencyKey, requestHash);
+            }
         }
-        List<Queue> queueList = this.queueRepository.findByTopic(topic.get());
-        if(queueList.isEmpty()){
-            throw new CustomException("No Queues are bound to the topic "+ rawTopicName);
+
+        Topic topic = topicRepository.findTopicByName(topicName)
+                .orElseThrow(() -> new ResourceNotFoundException("No Topic found with the name " + topicName));
+        List<Queue> queueList = queueRepository.findByTopic(topic);
+        if (queueList.isEmpty()) {
+            throw new CustomException("No Queues are bound to the topic " + topicName);
         }
-        queueList.forEach(queue->{
+
+        List<UUID> messageIds = new ArrayList<>();
+        for (Queue queue : queueList) {
             Message message = new Message();
             message.setPayload(payload);
             message.setQueue(queue);
             message.setStatus(MessageStatus.PENDING);
-            Message saved = this.messageRepository.save(message);
+            Message saved = messageRepository.save(message);
+            messageIds.add(saved.getId());
+
             ConsumeResponse response = ConsumeResponse.builder()
                     .messageId(saved.getId())
                     .payload(saved.getPayload())
                     .queueName(queue.getName())
                     .publishedAt(saved.getPublishedAt())
                     .build();
-            eventPublisher.publishEvent(new NewMessageEvent(response,queue.getName()));
-            eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.PUBLISHED,queue.getName(),"Message "+saved.getId()+" published to "+queue.getName(),LocalDateTime.now()));
+            eventPublisher.publishEvent(new NewMessageEvent(response, queue.getName()));
+            eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.PUBLISHED, queue.getName(),
+                    "Message " + saved.getId() + " published to " + queue.getName(), LocalDateTime.now()));
             brokerMetrics.incrementPublished();
-        });
+        }
+
+        if (idempotencyKey != null) {
+            publishRequests.recordMessages(publisherId, idempotencyKey, messageIds);
+        }
+        return PublishResponse.builder().messageIds(messageIds).duplicate(false).build();
+    }
+
+    /** The key was used before: answer with what that publish stored, and store nothing new. */
+    private PublishResponse replayEarlierPublish(UUID publisherId, String idempotencyKey, String requestHash) {
+        PublishRequestRepository.StoredRequest earlier = publishRequests.find(publisherId, idempotencyKey)
+                // Only possible if the hourly cleanup deleted the row in the instant between the
+                // claim and this read. The client's retry then succeeds as a fresh publish.
+                .orElseThrow(() -> new IllegalStateException("Idempotency key expired while being checked; retry"));
+        if (!earlier.requestHash().equals(requestHash)) {
+            throw new ConflictException("This Idempotency-Key was already used for a different topic or payload");
+        }
+        return PublishResponse.builder().messageIds(earlier.messageIds()).duplicate(true).build();
     }
 
     @Override

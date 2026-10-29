@@ -125,7 +125,14 @@ ok "queue drained"
 
 echo "5. Publish, consume, ack"
 PAYLOAD="smoke-$(date +%s)-$RANDOM"
-expect 200 "publish with a scoped key" POST "$B/api/v1/topics/$TOPIC/messages" "${CLIENT_AUTH[@]}" "${JSON[@]}" -d "{\"payload\":\"$PAYLOAD\"}"
+IDEMPOTENCY=(-H "Idempotency-Key: $PAYLOAD")
+expect 200 "publish with a scoped key" POST "$B/api/v1/topics/$TOPIC/messages" "${CLIENT_AUTH[@]}" "${JSON[@]}" "${IDEMPOTENCY[@]}" -d "{\"payload\":\"$PAYLOAD\"}"
+expect 200 "the same publish again (a retry)" POST "$B/api/v1/topics/$TOPIC/messages" "${CLIENT_AUTH[@]}" "${JSON[@]}" "${IDEMPOTENCY[@]}" -d "{\"payload\":\"$PAYLOAD\"}"
+if [[ "$(jq -r '.response_body.duplicate' "$BODY")" == "true" ]]; then
+    ok "the retry was recognised as a duplicate"
+else
+    fail "the retry was stored again: $(head -c 300 "$BODY")"
+fi
 expect 403 "publish outside the key's scopes is forbidden" POST "$B/api/v1/topics/not-$TOPIC/messages" "${CLIENT_AUTH[@]}" "${JSON[@]}" -d '{"payload":"x"}'
 expect 200 "consume claims the message" POST "$B/api/v1/queues/$QUEUE/consume" "${CLIENT_AUTH[@]}"
 if [[ "$(jq -r '.response_body.payload' "$BODY")" == "$PAYLOAD" ]]; then

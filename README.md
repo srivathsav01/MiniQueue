@@ -201,6 +201,10 @@ If the application set the timestamp, clock skew between broker instances could 
 
 Everything lives under `/api/v1`, so a future v2 can change shapes without breaking v1 clients. URLs name resources and the HTTP method says what happens. Consume is a `POST`, not a `GET`, because it changes state (`PENDING → UNACKED`), and HTTP allows browsers and proxies to repeat a `GET`.
 
+### Why publish takes an Idempotency-Key
+
+A producer's retry after a lost response would otherwise store the message twice. With `Idempotency-Key: <key>`, the broker stores at most one message per key and publisher: the publish transaction starts with `INSERT ... ON CONFLICT DO NOTHING` on `(client_id, idempotency_key)`, so a concurrent duplicate waits for the first and then gets the original message ids with `"duplicate": true`. If the first publish fails, its claim rolls back with it. Reusing a key for a different topic or payload is a `409`. Keys are remembered for 24 hours. The Java SDK sends a fresh key per `publish` call and the same key on every retry; `publish(topic, payload, key)` lets a producer derive the key from the event itself, so even a re-send after a crash is stored once.
+
 ### Why WebSocket is used only for notification, not for claiming
 
 Marking a message `UNACKED` at push time looks simpler, but if the consumer crashes between receiving the push and starting work, the message sits in `UNACKED` with nobody holding it until the redelivery timeout. It would also duplicate the claim logic in a second code path.
@@ -277,7 +281,7 @@ All REST endpoints are versioned under `/api/v1`. Programs send `Authorization: 
 
 | Method | Path | Body | Needs | Purpose |
 |---|---|---|---|---|
-| `POST` | `/api/v1/topics/{topic}/messages` | `{ "payload": "{\"orderId\": 42}" }` | `publish:{topic}` | Publish to every queue bound to the topic |
+| `POST` | `/api/v1/topics/{topic}/messages` | `{ "payload": "{\"orderId\": 42}" }` | `publish:{topic}` | Publish to every queue bound to the topic. Optional `Idempotency-Key` header: a repeat returns the original `message_ids` with `"duplicate": true` |
 | `POST` | `/api/v1/queues/{queue}/consume` | | `consume:{queue}` | Claim the oldest pending message: `200` with it, or `204` if none |
 | `POST` | `/api/v1/messages/{id}/ack` | | the consumer holding it | Mark processed |
 | `POST` | `/api/v1/messages/{id}/nack` | `{ "requeue": true }` (optional) | the consumer holding it | Reject: `true` (default) retries, `false` moves it to the DLQ |
@@ -475,6 +479,7 @@ cd ui && npm run build      # type-checks and builds the dashboard
 | `DashboardAuthIntegrationTest` | GitHub sign-in with GitHub mocked: state check, admin vs viewer, single-use codes and tickets, sign-out, metrics scope |
 | SDK `MiniQueueClientTest`, `RetryPolicyTest`, `MiniQueueConsumerTest` | HTTP contract, error mapping, retry backoff, the polling consumer |
 | Starter `MiniQueueAutoConfigurationTest` | `@MiniQueueListener` discovery, ack/nack, startup failures, instance ids |
+| `IdempotentPublishIntegrationTest` | 10 concurrent retries with one key store exactly one message; a reused key with a different payload is a 409; a failed publish frees its key |
 
 ### Against a running broker
 

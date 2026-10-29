@@ -13,11 +13,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * Plain-Java client for the MiniQueue broker.
@@ -37,11 +33,10 @@ import java.util.UUID;
  *
  * Thread-safe: create one instance per broker and share it. It holds a pooled HTTP
  * client, so creating one per request wastes connections.
- *
- * Retries: failures that may succeed on a second try (5xx, connection errors) are retried
- * according to the {@link RetryPolicy}, by default up to 3 attempts with exponential
- * backoff. 4xx failures are never retried. For a continuous consumer loop on top of this
- * client, see {@link MiniQueueConsumer}.
+ * A retry can repeat work the broker already did if only the response was lost. Publish
+ * is protected by its idempotency key, so the broker answers the retry with the original
+ * message ids instead of storing a copy. A retried ack may come back as a 409 Conflict
+ * because the first attempt already acked it, which is expected under at-least-once delivery.
  */
 public final class MiniQueueClient {
 
@@ -52,6 +47,9 @@ public final class MiniQueueClient {
 
     /** Optional header that tells replicas of the same client apart. */
     static final String INSTANCE_HEADER = "MiniQueue-Instance";
+
+    /** Makes a publish safe to repeat: the broker stores at most one message per key. */
+    static final String IDEMPOTENCY_HEADER = "Idempotency-Key";
 
     private final String baseUrl;
     // Never logged and never put in an exception message: anyone who sees it can act as this client.
@@ -82,16 +80,38 @@ public final class MiniQueueClient {
      * Publishes a message to a topic. The broker copies it into every queue bound to
      * that topic, atomically: either every queue gets it or none do.
      *
+     * Safe to retry: each call generates one idempotency key and sends the same key on every
+     * retry, so a retry after a lost response never stores a second copy.
+     *
      * @throws MiniQueueException.NotFound   if the topic does not exist
      * @throws MiniQueueException.BadRequest if no queue is bound to the topic
      */
-    public void publish(String topic, String payload) {
+    public PublishResult publish(String topic, String payload) {
+        return publish(topic, payload, UUID.randomUUID().toString());
+    }
+
+    /**
+     * Publishes with your own idempotency key, for deduplication across calls: if your
+     * service crashes after publishing and sends the same event again on restart, use a key
+     * derived from the event (an order id, say) and the broker stores it only once.
+     *
+     * The broker remembers a key for at least 24 hours, per API key. Reusing a key for a
+     * different topic or payload is rejected with {@link MiniQueueException.Conflict}.
+     *
+     * @param idempotencyKey 1 to 200 characters from A-Z, a-z, 0-9, '.', '_', ':' and '-'
+     */
+    public PublishResult publish(String topic, String payload, String idempotencyKey) {
         requireText(topic, "topic");
         Objects.requireNonNull(payload, "payload");
+        requireText(idempotencyKey, "idempotencyKey");
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("payload", payload);
-        send(post(API + "/topics/" + pathSegment(topic) + "/messages", body));
+        // Built once, outside the retry loop: every retry resends this exact request, key included.
+        HttpRequest request = jsonPost(API + "/topics/" + pathSegment(topic) + "/messages", body)
+                .header(IDEMPOTENCY_HEADER, idempotencyKey)
+                .build();
+        return toPublishResult(readTree(send(request)).path("response_body"));
     }
 
     /**
@@ -157,6 +177,10 @@ public final class MiniQueueClient {
     // ---------------------------------------------------------------------------------
 
     private HttpRequest post(String path, Map<String, Object> body) {
+        return jsonPost(path, body).build();
+    }
+
+    private HttpRequest.Builder jsonPost(String path, Map<String, Object> body) {
         String jsonBody;
         try {
             jsonBody = json.writeValueAsString(body);
@@ -166,8 +190,7 @@ public final class MiniQueueClient {
         }
         return newRequest(path)
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8));
     }
 
     private HttpRequest postWithoutBody(String path) {
@@ -273,6 +296,16 @@ public final class MiniQueueClient {
                     publishedAt == null ? null : LocalDateTime.parse(publishedAt));
         } catch (RuntimeException e) {
             throw new MiniQueueException("Unexpected consume response from MiniQueue: " + node, 200, e);
+        }
+    }
+
+    private PublishResult toPublishResult(JsonNode node) {
+        try {
+            List<UUID> ids = new ArrayList<>();
+            node.path("message_ids").forEach(id -> ids.add(UUID.fromString(id.asText())));
+            return new PublishResult(ids, node.path("duplicate").asBoolean(false));
+        } catch (RuntimeException e) {
+            throw new MiniQueueException("Unexpected publish response from MiniQueue: " + node, 200, e);
         }
     }
 

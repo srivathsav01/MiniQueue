@@ -1,4 +1,4 @@
-import type { ApiResponse, Queue, QueueMessageResponse, Topic } from "@/types/dashboard";
+import type { ApiResponse, PublishResult, Queue, QueueMessageResponse, Topic } from "@/types/dashboard";
 import apiClient from "./client";
 
 
@@ -18,8 +18,13 @@ function createQueue(queueName: string, topicName: string):Promise<Queue> {
     return apiClient.post<ApiResponse<Queue>>("/api/v1/queues", { name: queueName, topic_name:topicName }).then((response) => response.data.response_body);
 }
 
-function publishMessage(topicName: string, payload: string):Promise<String> {
-    return apiClient.post<ApiResponse<String>>(`/api/v1/topics/${encodeURIComponent(topicName)}/messages`, { payload }).then((response) => response.data.response_body);
+/** Same idempotencyKey = same message: the broker stores it once, however often this is sent. */
+function publishMessage(topicName: string, payload: string, idempotencyKey: string): Promise<PublishResult> {
+    return apiClient.post<ApiResponse<PublishResult>>(
+        `/api/v1/topics/${encodeURIComponent(topicName)}/messages`,
+        { payload },
+        { headers: { "Idempotency-Key": idempotencyKey } }
+    ).then((response) => response.data.response_body);
 }
 
 function getMessagesByQueue(queueName: string): Promise<QueueMessageResponse[]> {

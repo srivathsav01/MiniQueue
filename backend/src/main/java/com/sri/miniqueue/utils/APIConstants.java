@@ -11,4 +11,7 @@ public interface APIConstants {
 
     /** Optional header that tells replicas of one client apart, e.g. "pod-2". */
     String INSTANCE_HEADER = "MiniQueue-Instance";
+
+    /** Makes a publish safe to retry: one stored message per key and publisher. */
+    String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 }

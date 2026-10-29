@@ -80,3 +80,9 @@ export interface BrokerClient {
     created_at: string;
     last_used_at?: string;
 }
+
+/** What one publish stored: one message per bound queue. duplicate = an earlier send with the same key already did. */
+export interface PublishResult {
+    message_ids: string[];
+    duplicate: boolean;
+}

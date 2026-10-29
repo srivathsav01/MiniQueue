@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -90,6 +90,10 @@ export default function ManagePage() {
     // Viewers see topics but not the buttons that change anything (the server would answer 403 anyway).
     const { isAdmin } = useAuth();
 
+    // One idempotency key per message the user means to send. Retrying after a timeout reuses it,
+    // so the broker stores the message once; editing the topic or payload starts a new one.
+    const pendingPublish = useRef<{ key: string; topic: string; payload: string } | null>(null);
+
     const fetchTopics = () => {
         setLoading(true);
         getAllTopics()
@@ -142,12 +146,20 @@ export default function ManagePage() {
 
     const handlePublish = async () => {
         if (!selectedTopic || !payload.trim()) return;
-        setPublishing(true);
-        try {
-            await publishMessage(selectedTopic, payload.trim());
-            toast.success("Message published", {
-                description: `Published to ${selectedTopic}`,
-            });
+          setPublishing(true);
+          const content = payload.trim();
+          const pending = pendingPublish.current;
+          if (!pending || pending.topic !== selectedTopic || pending.payload !== content) {
+              pendingPublish.current = { key: crypto.randomUUID(), topic: selectedTopic, payload: content };
+          }
+          try {
+              const result = await publishMessage(selectedTopic, content, pendingPublish.current!.key);
+              pendingPublish.current = null;
+              toast.success(result.duplicate ? "Already published" : "Message published", {
+                  description: result.duplicate
+                      ? "The broker had already stored this message, so nothing was duplicated."
+                      : `Published to ${selectedTopic} (${result.message_ids.length} queue${result.message_ids.length === 1 ? "" : "s"})`,
+              });
             setPayload("");
             setSelectedTopic("");
             setMessageDialogOpen(false);
