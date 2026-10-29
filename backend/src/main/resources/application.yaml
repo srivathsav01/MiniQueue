@@ -1,3 +1,7 @@
+# Shown at /actuator/info. Render sets RENDER_GIT_COMMIT for every deploy.
+info:
+  commit: ${RENDER_GIT_COMMIT:local}
+
 server:
   port: 8080
 
@@ -50,11 +54,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: prometheus,health
+        include: prometheus,health,info
   info:
     env:
       enabled: true
-
-# Shown at /actuator/info. Render sets RENDER_GIT_COMMIT for every deploy.
-info:
-  commit: ${RENDER_GIT_COMMIT:local}
