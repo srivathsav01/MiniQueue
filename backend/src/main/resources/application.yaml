@@ -51,3 +51,10 @@ management:
     web:
       exposure:
         include: prometheus,health
+  info:
+    env:
+      enabled: true
+
+# Shown at /actuator/info. Render sets RENDER_GIT_COMMIT for every deploy.
+info:
+  commit: ${RENDER_GIT_COMMIT:local}

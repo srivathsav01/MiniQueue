@@ -1,0 +1,31 @@
+# Runs scripts/smoke-test.sh against production:
+#   - after every deploy (called by ci.yml, waiting until the new commit is live)
+#   - every morning, to catch problems no push caused (an expired secret, a full database)
+#   - by hand, from the Actions tab ("Run workflow")
+name: Smoke test
+
+on:
+  workflow_call:
+    inputs:
+      expected-commit:
+        description: Wait until production runs this commit before testing
+        type: string
+        default: ''
+  workflow_dispatch:
+  schedule:
+    - cron: '30 0 * * *' # 00:30 UTC = 06:00 in India
+
+jobs:
+  smoke:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run against production
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+          DASHBOARD_URL: ${{ vars.DASHBOARD_URL }}
+          ADMIN_KEY: ${{ secrets.MINIQUEUE_ADMIN_KEY }}
+          EXPECTED_COMMIT: ${{ inputs.expected-commit }}
+        run: bash scripts/smoke-test.sh

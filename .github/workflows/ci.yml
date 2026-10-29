@@ -1,0 +1,96 @@
+# Every pull request and every push to main: test the backend, the SDK and the dashboard.
+# On main, if all three pass: deploy that exact commit to Render, then smoke-test production.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same pull request cancels the older run. Runs on main are never
+# cancelled half-way, so a deploy is never interrupted.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      # GitHub's ubuntu runners have Docker, so the Testcontainers tests start a real Postgres here too.
+      - name: Test
+        working-directory: backend
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp verify
+
+  sdk:
+    name: SDK tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: sdk/**/pom.xml
+      - name: Test
+        working-directory: sdk
+        run: |
+          chmod +x mvnw
+          ./mvnw -B -ntp verify
+
+  ui:
+    name: Dashboard build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      # tsc -b plus vite build: catches type errors and broken imports.
+      - run: npm run build
+      # Reported, not blocking yet: the existing code has lint errors to clean up first.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to Render
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend, sdk, ui]
+    runs-on: ubuntu-latest
+    steps:
+      # Deploy hooks are secret URLs from each Render service's Settings. ref= pins the deploy
+      # to the commit that just passed the tests, not whatever is newest on main by now.
+      - name: Deploy backend and dashboard
+        env:
+          BACKEND_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+          UI_HOOK: ${{ secrets.RENDER_UI_DEPLOY_HOOK }}
+        run: |
+          curl -fsS -X POST "${BACKEND_HOOK}&ref=${GITHUB_SHA}"
+          echo
+          curl -fsS -X POST "${UI_HOOK}&ref=${GITHUB_SHA}"
+
+  smoke:
+    name: Smoke test production
+    needs: deploy
+    uses: ./.github/workflows/smoke.yml
+    with:
+      expected-commit: ${{ github.sha }}
+    secrets: inherit

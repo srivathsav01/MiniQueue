@@ -59,7 +59,7 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll() // Spring's error forward; denying it turns real errors into 401
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/github/login", "/api/v1/auth/github/callback").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/exchange").permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
                         // Public on purpose: the source is public, so hiding the docs hides nothing
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
 
