@@ -23,4 +23,7 @@ public class ConsumeResponse {
 
         @JsonProperty("queue_name")
         private String queueName;
+
+        @JsonProperty("lease_seconds")
+        private Integer leaseSeconds;
 }

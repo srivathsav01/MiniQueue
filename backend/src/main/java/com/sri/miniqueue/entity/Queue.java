@@ -21,6 +21,10 @@ public class Queue {
     @Column(nullable = false,unique = true)
     private String name;
 
+    /** Lease length for messages in this queue. Null means miniqueue.lease.default-seconds. */
+    @Column
+    private Integer leaseSeconds;
+
     @ManyToOne()
     @JoinColumn(name="topic_id", referencedColumnName ="id")
     private Topic topic;

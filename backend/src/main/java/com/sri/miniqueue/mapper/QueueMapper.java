@@ -14,6 +14,7 @@ public class QueueMapper {
         queueResponse.setId(queue.getId());
         queueResponse.setName(queue.getName());
         queueResponse.setTopicName(queue.getTopic().getName());
+        queueResponse.setLeaseSeconds(queue.getLeaseSeconds());
         return queueResponse;
     }
 }

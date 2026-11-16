@@ -12,9 +12,12 @@ app:
 miniqueue:
   redelivery:
     timeout-minutes: 10
-    fixed-delay-ms: 60000
+    fixed-delay-ms: ${MINIQUEUE_REDELIVERY_FIXEDDELAYMS:5000}
     max-retries: 3
     batch-size: 100
+  lease:
+    default-seconds: ${MINIQUEUE_LEASE_DEFAULTSECONDS:600} # 10 minutes: unchanged for consumers that don't heartbeat
+    max-seconds: ${MINIQUEUE_LEASE_MAXSECONDS:43200}
   limits:
     max-payload-bytes: 262144 #256 KB
   security:

@@ -68,6 +68,23 @@ public class MessageServiceImpl implements MessageService {
     // Printable and header-safe: UUIDs, order ids ("order-42"), "invoice:2026:17"...
     private static final Pattern IDEMPOTENCY_KEY = Pattern.compile("[A-Za-z0-9._:-]{1,200}");
 
+    @Value("${miniqueue.lease.default-seconds}")
+    private int defaultLeaseSeconds;
+
+    @Value("${miniqueue.lease.max-seconds}")
+    private int maxLeaseSeconds;
+
+    private int leaseSecondsFor(Queue queue) {
+        return queue.getLeaseSeconds() != null ? queue.getLeaseSeconds() : defaultLeaseSeconds;
+    }
+
+    /** Wakes one connected consumer. Fires after commit, so the consumer sees the message as PENDING. */
+    private void notifyAvailable(Message msg) {
+        String queueName = msg.getQueue().getName();
+        eventPublisher.publishEvent(new NewMessageEvent(
+                ConsumeResponse.builder().messageId(msg.getId()).queueName(queueName).build(), queueName));
+    }
+
     @Override
     @Transactional
     public Topic createTopic(String rawName) {
@@ -203,15 +220,19 @@ public class MessageServiceImpl implements MessageService {
             throw new NoMessageAvailableException("No Messages found in the Queue "+queueName);
         }
         Message msg = message.get();
+        LocalDateTime now = LocalDateTime.now();
+        int leaseSeconds = leaseSecondsFor(queue.get());
         msg.setStatus(MessageStatus.UNACKED);
         msg.setConsumerId(consumerId);
-        msg.setUnackedAt(LocalDateTime.now());
+        msg.setUnackedAt(now);
+        msg.setLeaseExpiresAt(now.plusSeconds(leaseSeconds));
         this.messageRepository.save(msg);
         eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.CONSUMED,queueName,"Message "+msg.getId()+" consumed by "+ consumerId,LocalDateTime.now()));
         brokerMetrics.incrementConsumed();
         ConsumeResponse consumeResponse = new ConsumeResponse();
         consumeResponse.setMessageId(msg.getId());
         consumeResponse.setPayload(msg.getPayload());
+        consumeResponse.setLeaseSeconds(leaseSeconds);
         consumeResponse.setPublishedAt(msg.getPublishedAt());
         consumeResponse.setQueueName(queueName);
         return consumeResponse;
@@ -259,7 +280,7 @@ public class MessageServiceImpl implements MessageService {
             msg.setRetryCount(retries);
             msg.setConsumerId(null);
             msg.setUnackedAt(null);
-
+            msg.setLeaseExpiresAt(null);
             if (retries >= maxRetries) {
                 msg.setStatus(MessageStatus.DEAD);
                 this.messageRepository.save(msg);
@@ -271,6 +292,7 @@ public class MessageServiceImpl implements MessageService {
 
             msg.setStatus(MessageStatus.PENDING);
             this.messageRepository.save(msg);
+            notifyAvailable(msg);
             eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.NACKED, msg.getQueue().getName(),
                     "Message " + msg.getId() + " nacked by " + consumerId + " (attempt " + retries + ")", LocalDateTime.now()));
             brokerMetrics.incrementNacked();
@@ -296,19 +318,49 @@ public class MessageServiceImpl implements MessageService {
     @Override
     @Transactional(rollbackFor = CustomException.class)
     public String replayMessage(UUID messageId) {
-        Optional<Message> msg = messageRepository.findByIdForUpdate(messageId);
-        if(msg.isEmpty()) {
-            throw new ResourceNotFoundException("No message found with id " + messageId);
-        }
-        if(msg.get().getStatus() != MessageStatus.DEAD) {
+        Message msg = messageRepository.findByIdForUpdate(messageId)
+                .orElseThrow(() -> new ResourceNotFoundException("No message found with id " + messageId));
+        if (msg.getStatus() != MessageStatus.DEAD) {
             throw new ConflictException("Only DEAD messages can be replayed");
         }
-        msg.get().setStatus(MessageStatus.PENDING);
-        msg.get().setConsumerId(null);
-        msg.get().setUnackedAt(null);
-        messageRepository.save(msg.get());
-        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.REPLAYED,msg.get().getQueue().getName(),"Message "+msg.get().getId()+" replayed from DLQ", LocalDateTime.now()));
+        msg.setStatus(MessageStatus.PENDING);
+        msg.setConsumerId(null);
+        msg.setUnackedAt(null);
+        msg.setLeaseExpiresAt(null);
+        messageRepository.save(msg);
+        eventPublisher.publishEvent(new BrokerActivityEvent(BrokerEventType.REPLAYED, msg.getQueue().getName(),
+                "Message " + msg.getId() + " replayed from DLQ", LocalDateTime.now()));
         brokerMetrics.incrementRedelivered();
-        return "Reset Message "+messageId+" to PENDING";
+        notifyAvailable(msg);
+        return "Reset Message " + messageId + " to PENDING";
+    }
+
+    @Override
+    @Transactional(rollbackFor = CustomException.class)
+    public int heartbeat(UUID messageId, String consumerId) throws CustomException {
+        Message msg = this.messageRepository.findByIdForUpdate(messageId)
+                .orElseThrow(() -> new ResourceNotFoundException("No message found with the id " + messageId));
+        if (msg.getStatus() != MessageStatus.UNACKED) {
+            throw new ConflictException("The message " + messageId + " is not in unacked state");
+        }
+        if (!consumerId.equals(msg.getConsumerId())) {
+            throw new ConflictException("Invalid Consumer ID " + consumerId);
+        }
+        int leaseSeconds = leaseSecondsFor(msg.getQueue());
+        msg.setLeaseExpiresAt(LocalDateTime.now().plusSeconds(leaseSeconds));
+        this.messageRepository.save(msg);
+        return leaseSeconds;
+    }
+
+    @Override
+    @Transactional(rollbackFor = CustomException.class)
+    public Queue updateQueueLease(String queueName, Integer leaseSeconds) throws CustomException {
+        Queue queue = this.queueRepository.findByName(queueName.toLowerCase())
+                .orElseThrow(() -> new ResourceNotFoundException("No Queue found with the name " + queueName));
+        if (leaseSeconds != null && (leaseSeconds < 5 || leaseSeconds > maxLeaseSeconds)) {
+            throw new CustomException("lease_seconds must be between 5 and " + maxLeaseSeconds);
+        }
+        queue.setLeaseSeconds(leaseSeconds);
+        return this.queueRepository.save(queue);
     }
 }

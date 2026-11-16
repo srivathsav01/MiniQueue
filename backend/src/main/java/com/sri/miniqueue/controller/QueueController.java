@@ -1,10 +1,6 @@
 package com.sri.miniqueue.controller;
 
-import com.sri.miniqueue.dto.ConsumeResponse;
-import com.sri.miniqueue.dto.CreateQueueRequest;
-import com.sri.miniqueue.dto.MessageResponse;
-import com.sri.miniqueue.dto.QueueResponse;
-import com.sri.miniqueue.dto.Response;
+import com.sri.miniqueue.dto.*;
 import com.sri.miniqueue.mapper.QueueMapper;
 import com.sri.miniqueue.mapper.ResponseBuilder;
 import com.sri.miniqueue.security.ClientPrincipal;
@@ -44,11 +40,18 @@ public class QueueController {
     }
 
     // POST /api/v1/queues/{queueName}/consume   (no body)
-// The consumer is whoever owns the API key, not whatever the request claims.
+    // The consumer is whoever owns the API key, not whatever the request claims.
     @PostMapping("/{queueName}/consume")
     public Response<ConsumeResponse> consumeMessage(@PathVariable String queueName,
                                                     @AuthenticationPrincipal ClientPrincipal client,
                                                     @RequestHeader(value = APIConstants.INSTANCE_HEADER, required = false) String instance) {
         return ResponseBuilder.createSuccessData(messageService.consumeMessage(queueName, client.consumerId(instance)));
+    }
+
+    // PATCH /api/v1/queues/{queueName}   { "lease_seconds": 15 }
+    @PatchMapping("/{queueName}")
+    public Response<QueueResponse> updateQueue(@PathVariable String queueName, @RequestBody UpdateQueueRequest request) {
+        return ResponseBuilder.createSuccessData(queueMapper.toResponse(
+                messageService.updateQueueLease(queueName, request.getLeaseSeconds())));
     }
 }

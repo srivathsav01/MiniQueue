@@ -19,4 +19,7 @@ public class QueueResponse {
 
     private String topicName;
 
+    @JsonProperty("lease_seconds")
+    private Integer leaseSeconds;
+
 }

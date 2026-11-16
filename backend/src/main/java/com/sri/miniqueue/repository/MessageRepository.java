@@ -44,4 +44,8 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT m FROM Message m WHERE m.id = :id")
     Optional<Message> findByIdForUpdate(@Param("id") UUID id);
+
+    @Query(value = "SELECT m.* FROM message m WHERE m.status = :status AND m.lease_expires_at < :now " +
+            "ORDER BY m.lease_expires_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<Message> claimExpiredLeases(@Param("status") String status, @Param("now") LocalDateTime now, @Param("limit") int limit);
 }

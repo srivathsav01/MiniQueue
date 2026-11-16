@@ -35,6 +35,11 @@ public interface MessageService {
         return publishMessage(topicName, payload, null, null);
     }
 
+    /** Extends the caller's lease on a message it holds. Returns the new lease length in seconds. */
+    int heartbeat(UUID messageId, String consumerId) throws CustomException;
+
+    Queue updateQueueLease(String queueName, Integer leaseSeconds) throws CustomException;
+
     ConsumeResponse consumeMessage(String queueName, String consumerId) throws CustomException;
 
     String ackMessage(UUID messageId, String consumerId) throws CustomException;

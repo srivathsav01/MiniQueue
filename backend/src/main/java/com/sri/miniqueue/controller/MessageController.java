@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.UUID;
 
 /** Actions on one message that a consumer already holds. */
@@ -37,5 +38,14 @@ public class MessageController {
         // No body or no "requeue" means requeue: the safe default gives the message another attempt.
         boolean requeue = request == null || request.getRequeue() == null || request.getRequeue();
         return ResponseBuilder.createSuccessData(messageService.nackMessage(messageId, client.consumerId(instance), requeue));
+    }
+
+    // POST /api/v1/messages/{messageId}/heartbeat   (no body)
+    @PostMapping("/{messageId}/heartbeat")
+    public Response<Map<String, Integer>> heartbeat(@PathVariable UUID messageId,
+                                                    @AuthenticationPrincipal ClientPrincipal client,
+                                                    @RequestHeader(value = APIConstants.INSTANCE_HEADER, required = false) String instance) {
+        int leaseSeconds = messageService.heartbeat(messageId, client.consumerId(instance));
+        return ResponseBuilder.createSuccessData(Map.of("lease_seconds", leaseSeconds));
     }
 }

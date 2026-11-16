@@ -71,7 +71,7 @@ public class SecurityConfig {
                         .access(scope(Scopes.PUBLISH, ctx -> ctx.getVariables().get("topic")))
                         .requestMatchers(HttpMethod.POST, "/api/v1/queues/{queue}/consume")
                         .access(scope(Scopes.CONSUME, ctx -> ctx.getVariables().get("queue")))
-                        .requestMatchers(HttpMethod.POST, "/api/v1/messages/*/ack", "/api/v1/messages/*/nack").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/messages/*/ack", "/api/v1/messages/*/nack", "/api/v1/messages/*/heartbeat").authenticated()
                         .requestMatchers("/ws/consume")
                         .access(scope(Scopes.CONSUME, ctx -> ctx.getRequest().getParameter("queue")))
 

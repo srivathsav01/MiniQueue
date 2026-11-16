@@ -37,6 +37,9 @@ public class Message {
     @Column
     private LocalDateTime unackedAt;
 
+    @Column
+    private LocalDateTime leaseExpiresAt;
+
     @ManyToOne()
     @JoinColumn(name="queue_id", referencedColumnName ="id", nullable = false)
     private Queue queue;
